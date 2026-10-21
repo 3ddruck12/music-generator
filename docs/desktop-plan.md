@@ -223,6 +223,15 @@ lädt und „Generieren“ den Fake-Server erreicht. Optional in Phase 3.
 - **Updates**: In der installierten App ist der Git-Updater aus (Meldung „Updates kommen mit der Desktop-App“).
 - **uv** wird als Sidecar mit der App ausgeliefert (CI lädt uv je Plattform), sonst aus dem PATH.
 
+## Stand 2026-10-21 (abends)
+
+- Linux-Modellserver: Release `engine-linux-x64-b7ba6d9` im Fork (Workflow `engine-linux.yml`), in `common.sh` eingetragen.
+- Einrichtung auf Linux Mint 22.3 mit Quadro T2000 (4 GB) komplett durchgelaufen: 0.6B, Grafiktest ok (Modus single),
+  VAE_CHUNK 128, Vulkan auf der NVIDIA-Karte.
+- Gefundene Fehler: Links im Engine-ZIP (behoben) und `GGML_VK_VISIBLE_DEVICES=0` aus `arch_linux.sh` (wählt bei
+  Intel + NVIDIA die Onboard-Grafik, in der App entfernt; im Upstream-Skript ebenfalls prüfen → PR).
+- CI (`ci.yml`): Lint und Tests auf Linux, Windows, macOS grün.
+
 ## Noch offen
 
 - **Updates**: Soll der Code-Updater (`git pull`) auf den Fork zeigen? Soll die Hülle zusätzlich über den Tauri-Updater

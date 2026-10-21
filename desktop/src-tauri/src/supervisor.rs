@@ -373,9 +373,8 @@ pub fn server_args(models: &Path, conf: &EngineConf) -> Vec<OsString> {
 fn engine_env() -> Vec<(&'static str, OsString)> {
     let mut v = Vec::new();
     if cfg!(target_os = "linux") {
-        if std::env::var_os("GGML_VK_VISIBLE_DEVICES").is_none() {
-            v.push(("GGML_VK_VISIBLE_DEVICES", OsString::from("0")));
-        }
+        // Kein GGML_VK_VISIBLE_DEVICES=0 wie in arch_linux.sh: Bei Intel + NVIDIA ist Gerät 0 die Onboard-Grafik.
+        // acestep.cpp wählt ohne Vorgabe selbst die dedizierte Karte; eine selbst gesetzte Variable wird vererbt.
         if Path::new("/opt/rocm/lib").is_dir() {
             let mut p = OsString::from("/opt/rocm/lib");
             if let Some(old) = std::env::var_os("LD_LIBRARY_PATH") {
