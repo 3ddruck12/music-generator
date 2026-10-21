@@ -15,7 +15,14 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb", "rpm", "appimage", "msi", "dmg", "app"],
+    "targets": [
+      "deb",
+      "rpm",
+      "appimage",
+      "msi",
+      "dmg",
+      "app"
+    ],
     "category": "Music",
     "shortDescription": "Eigene Songs lokal erzeugen",
     "longDescription": "Desktop-App für den lokalen Music Generator: ACE-Step 1.5 über acestep.cpp, ohne Cloud.",
@@ -29,21 +36,38 @@
     ],
     "linux": {
       "deb": {
-        "depends": ["gstreamer1.0-plugins-good", "gstreamer1.0-libav"]
+        "depends": [
+          "gstreamer1.0-plugins-good",
+          "gstreamer1.0-libav"
+        ]
       },
       "rpm": {
-        "depends": ["gstreamer1-plugins-good"]
+        "depends": [
+          "gstreamer1-plugins-good"
+        ]
       }
     },
     "windows": {
       "wix": {
-        "language": ["de-DE", "en-US"],
+        "language": [
+          "de-DE",
+          "en-US"
+        ],
         "upgradeCode": "66aefcc8-27f8-4a97-a2d1-7fd8c8123913"
       }
     },
     "macOS": {
       "minimumSystemVersion": "12.0",
       "infoPlist": "Info.plist"
+    },
+    "resources": {
+      "../../app/": "project/app/",
+      "../../static/": "project/static/",
+      "../../scripts/common.sh": "project/scripts/common.sh",
+      "../../scripts/metal_selftest.py": "project/scripts/metal_selftest.py",
+      "../../pyproject.toml": "project/pyproject.toml",
+      "../../uv.lock": "project/uv.lock",
+      "../../LICENSE": "project/LICENSE"
     }
   }
 }

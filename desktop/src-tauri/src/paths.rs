@@ -148,9 +148,10 @@ pub fn child_path() -> std::ffi::OsString {
     std::env::join_paths(dirs).unwrap_or_default()
 }
 
-/// `uv`: zuerst das mit der App ausgelieferte Programm (neben der ausführbaren Datei), dann der PATH.
+/// `uv`: zuerst das mit der App ausgelieferte `mg-uv` (neben der ausführbaren Datei; eigener Name, damit es unter
+/// Linux nicht mit einem `uv` aus der Paketverwaltung in `/usr/bin` kollidiert), dann `uv` aus dem PATH.
 pub fn uv() -> Option<PathBuf> {
-    let exe = if cfg!(windows) { "uv.exe" } else { "uv" };
+    let exe = if cfg!(windows) { "mg-uv.exe" } else { "mg-uv" };
     std::env::current_exe()
         .ok()
         .and_then(|e| e.parent().map(|d| d.join(exe)))
