@@ -282,6 +282,8 @@ mod tests {
         .bundled());
     }
 
+    // AppImage gibt es nur unter Linux; die Beispielpfade nutzen „:“ als Trenner (Windows: „;“)
+    #[cfg(unix)]
     #[test]
     fn appimage_paths_are_removed() {
         let a = Path::new("/tmp/.mount_Music123");
