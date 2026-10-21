@@ -484,13 +484,19 @@ fn navigation_allowed(url: &Url, web_port: u16, dev_url: Option<&Url>) -> bool {
     }
 }
 
-/// Linux: WebKitGTK fragt nicht selbst nach dem Mikrofon und lehnt sonst ab. Für „Idee aufnehmen“ wird es nur der
+/// Linux: WebKitGTK hat Mikrofon-Zugriff ab Werk ausgeschaltet, fragt nicht selbst nach und lehnt sonst ab. Für „Idee aufnehmen“ wird es nur der
 /// eigenen Web-App erlaubt (macOS und Windows fragen über das System bzw. WebView2).
 fn allow_microphone(win: &tauri::WebviewWindow, web_port: u16) -> tauri::Result<()> {
     #[cfg(target_os = "linux")]
     win.with_webview(move |wv| {
         use webkit2gtk::glib::ObjectExt;
-        use webkit2gtk::{PermissionRequestExt, UserMediaPermissionRequest, WebViewExt};
+        use webkit2gtk::{
+            PermissionRequestExt, SettingsExt, UserMediaPermissionRequest, WebViewExt,
+        };
+        // WebKitGTK hat getUserMedia ab Werk aus (wry schaltet es nicht ein): ohne das kein navigator.mediaDevices
+        if let Some(settings) = wv.inner().settings() {
+            settings.set_enable_media_stream(true);
+        }
         let ours = [
             format!("http://localhost:{web_port}/"),
             format!("http://127.0.0.1:{web_port}/"),
@@ -512,9 +518,14 @@ fn allow_microphone(win: &tauri::WebviewWindow, web_port: u16) -> tauri::Result<
     Ok(())
 }
 
-/// Skript für die Web-App im Hauptfenster: Sprache melden, Downloads an die Hülle leiten (`webapp.js`).
+/// Skript für die Web-App im Hauptfenster: Sprache melden, Downloads an die Hülle leiten (`webapp.js`), unter Linux
+/// Aufnahme als WAV (`wav-recorder.js`).
 fn init_script(web_port: u16) -> String {
-    include_str!("webapp.js").replace("__PORT__", &web_port.to_string())
+    let mut js = include_str!("webapp.js").to_string();
+    if cfg!(target_os = "linux") {
+        js.push_str(include_str!("wav-recorder.js")); // MediaRecorder von WebKitGTK liefert leere Aufnahmen
+    }
+    js.replace("__PORT__", &web_port.to_string())
 }
 
 // ------------------------------------------------------------------ Steuerung (eigener Thread)

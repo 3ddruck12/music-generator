@@ -4,8 +4,11 @@ Desktop-App (Tauri) für den lokalen Music Generator (ACE-Step 1.5 über acestep
 „ON/OFF“ und Browser. Beim ersten Start richtet die App alles selbst ein: Modellserver, Modelle (4–11 GB, mit Fortsetzen
 und SHA-256-Prüfung), Python-Umgebung und Grafiktest.
 
-**Neu in 0.1.1:** Das AppImage startet wieder (0.1.0: „Failed to import encodings module“, weil der AppImage-Starter
-`PYTHONHOME` setzt), und es bringt jetzt GStreamer für die Wiedergabe mit.
+**Neu in 0.1.2:**
+- „Idee aufnehmen“ funktioniert unter Linux: Mikrofon-Zugriff in WebKitGTK eingeschaltet, Aufnahme als WAV statt über
+  den MediaRecorder von WebKitGTK (lieferte leere Aufnahmen).
+- AppImage startet (0.1.0: „Failed to import encodings module“, weil der AppImage-Starter `PYTHONHOME` setzt) und bringt
+  GStreamer für Wiedergabe und Aufnahme mit.
 
 > ⚠️ **Alpha – nur unter Linux getestet** (Linux Mint 22.3, NVIDIA Quadro T2000 über Vulkan).
 > **Windows (MSI) und macOS (DMG) sind gebaut, aber nicht getestet.** Rückmeldungen sind sehr willkommen.
