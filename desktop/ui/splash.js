@@ -83,6 +83,12 @@ function updateSizes() {
   let mb = plan.base_mb;
   if (!plan.present.includes(lmName)) mb += plan.sizes_mb[c.lm] || 0;
   if (c.xl && !plan.present.some((n) => n.includes("xl-sft"))) mb += plan.sizes_mb.XL || 0;
+  const sizes = ["0.6B", "1.7B", "4B"], hw = plan.hardware;
+  const warnings = [];
+  if (sizes.indexOf(c.lm) > sizes.indexOf(plan.recommended)) warnings.push(t("setup_warn_big"));
+  if (c.xl && (hw.vram_gb ? hw.vram_gb < 12 : hw.ram_gb < 16)) warnings.push(t("setup_warn_xl"));
+  $("#warn").textContent = warnings.join(" ");
+  $("#warn").hidden = !warnings.length;
   $("#sizes").textContent = `${t("setup_download", { size: gb(mb) })} · ${t("setup_free", { size: `${plan.hardware.free_gb} GB` })}`;
 }
 

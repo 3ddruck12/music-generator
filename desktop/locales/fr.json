@@ -58,5 +58,7 @@
   "setup_err_unpack": "Impossible de décompresser le serveur de modèles : {detail}",
   "setup_err_python": "Impossible de configurer l’environnement Python : {detail}",
   "setup_err_selftest": "Le test graphique a échoué : {detail}",
-  "setup_err_cancelled": "Configuration annulée."
+  "setup_err_cancelled": "Configuration annulée.",
+  "setup_warn_big": "Plus grand que recommandé pour cet ordinateur : le serveur de modèles peut planter au chargement ou être très lent.",
+  "setup_warn_xl": "XL nécessite au moins 16 Go de mémoire ou 12 Go de mémoire graphique et ne fonctionnera probablement pas ici."
 }

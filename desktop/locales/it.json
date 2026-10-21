@@ -58,5 +58,7 @@
   "setup_err_unpack": "Impossibile estrarre il server dei modelli: {detail}",
   "setup_err_python": "Impossibile configurare l’ambiente Python: {detail}",
   "setup_err_selftest": "Il test grafico non è riuscito: {detail}",
-  "setup_err_cancelled": "Configurazione annullata."
+  "setup_err_cancelled": "Configurazione annullata.",
+  "setup_warn_big": "Più grande del consigliato per questo computer: il server dei modelli potrebbe bloccarsi al caricamento o essere molto lento.",
+  "setup_warn_xl": "XL richiede almeno 16 GB di memoria o 12 GB di memoria grafica e probabilmente qui non funzionerà."
 }

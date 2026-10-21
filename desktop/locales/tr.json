@@ -58,5 +58,7 @@
   "setup_err_unpack": "Model sunucusu açılamadı: {detail}",
   "setup_err_python": "Python ortamı kurulamadı: {detail}",
   "setup_err_selftest": "Grafik testi başarısız: {detail}",
-  "setup_err_cancelled": "Kurulum iptal edildi."
+  "setup_err_cancelled": "Kurulum iptal edildi.",
+  "setup_warn_big": "Bu bilgisayar için önerilenden büyük: model sunucusu yüklenirken çökebilir veya çok yavaş olabilir.",
+  "setup_warn_xl": "XL en az 16 GB bellek veya 12 GB grafik belleği gerektirir ve burada muhtemelen çalışmaz."
 }

@@ -58,5 +58,7 @@
   "setup_err_unpack": "The model server could not be unpacked: {detail}",
   "setup_err_python": "The Python environment could not be set up: {detail}",
   "setup_err_selftest": "The graphics test failed: {detail}",
-  "setup_err_cancelled": "Setup cancelled."
+  "setup_err_cancelled": "Setup cancelled.",
+  "setup_warn_big": "Larger than recommended for this computer: the model server may crash while loading or be very slow.",
+  "setup_warn_xl": "XL needs at least 16 GB memory or 12 GB graphics memory and will probably not run here."
 }

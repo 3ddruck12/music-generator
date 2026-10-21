@@ -58,5 +58,7 @@
   "setup_err_unpack": "Nie udało się rozpakować serwera modeli: {detail}",
   "setup_err_python": "Nie udało się skonfigurować środowiska Python: {detail}",
   "setup_err_selftest": "Test grafiki nie powiódł się: {detail}",
-  "setup_err_cancelled": "Konfiguracja przerwana."
+  "setup_err_cancelled": "Konfiguracja przerwana.",
+  "setup_warn_big": "Większy niż zalecany dla tego komputera: serwer modeli może się zawiesić przy ładowaniu lub działać bardzo wolno.",
+  "setup_warn_xl": "XL wymaga co najmniej 16 GB pamięci lub 12 GB pamięci graficznej i tutaj prawdopodobnie nie zadziała."
 }

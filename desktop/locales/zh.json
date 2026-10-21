@@ -58,5 +58,7 @@
   "setup_err_unpack": "无法解压模型服务器：{detail}",
   "setup_err_python": "无法设置 Python 环境：{detail}",
   "setup_err_selftest": "显卡测试失败：{detail}",
-  "setup_err_cancelled": "设置已取消。"
+  "setup_err_cancelled": "设置已取消。",
+  "setup_warn_big": "超出此电脑的推荐规格：模型服务器在加载时可能崩溃或运行很慢。",
+  "setup_warn_xl": "XL 至少需要 16 GB 内存或 12 GB 显存，在这里很可能无法运行。"
 }

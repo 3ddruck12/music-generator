@@ -58,5 +58,7 @@
   "setup_err_unpack": "Der Modellserver konnte nicht entpackt werden: {detail}",
   "setup_err_python": "Die Python-Umgebung konnte nicht eingerichtet werden: {detail}",
   "setup_err_selftest": "Der Grafiktest ist fehlgeschlagen: {detail}",
-  "setup_err_cancelled": "Einrichtung abgebrochen."
+  "setup_err_cancelled": "Einrichtung abgebrochen.",
+  "setup_warn_big": "Größer als für diesen Rechner empfohlen: Der Modellserver kann beim Laden abstürzen oder sehr langsam sein.",
+  "setup_warn_xl": "XL braucht mindestens 16 GB Arbeitsspeicher bzw. 12 GB Grafikspeicher und wird hier vermutlich nicht laufen."
 }
