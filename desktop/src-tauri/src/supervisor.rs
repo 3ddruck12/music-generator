@@ -253,10 +253,10 @@ impl Supervisor {
         let mut cmd = Command::new(program);
         cmd.args(args)
             .current_dir(&self.layout.code)
-            .env("PATH", paths::child_path())
             .stdin(Stdio::null())
             .stdout(out)
             .stderr(err);
+        paths::prepare(&mut cmd);
         for (k, v) in engine_env() {
             cmd.env(k, v);
         }
@@ -390,6 +390,7 @@ fn engine_env() -> Vec<(&'static str, OsString)> {
 fn help_mentions(ace: &Path, flag: &str) -> bool {
     let mut cmd = Command::new(ace);
     cmd.arg("--help").stdin(Stdio::null());
+    paths::prepare(&mut cmd);
     hide_console(&mut cmd);
     cmd.output()
         .map(|o| {
