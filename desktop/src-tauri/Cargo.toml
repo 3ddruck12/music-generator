@@ -10,6 +10,12 @@ rust-version = "1.80"
 name = "music_generator_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# Startseite fest in die Programmdatei einbauen. `tauri dev` schaltet das ab und nutzt seinen Entwicklungsserver;
+# ohne dieses Feature sucht auch ein `cargo build` den Entwicklungsserver auf Port 1430.
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

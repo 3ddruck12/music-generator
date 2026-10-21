@@ -4,7 +4,7 @@
 //! - **Datenordner** (`home`): `engine/` (Modellserver und Modelle), `data/` (Songs, Datenbank, Logs), `.venv`.
 //!   Standard `~/MusicGenerator` – derselbe Ordner wie bei den Installer-Skripten, vorhandene Installationen werden genutzt.
 //!
-//! Beim Entwickeln (und bei Installationen über die Skripte) sind beide Ordner derselbe.
+//! Bei Installationen über die Skripte sind beide Ordner derselbe (`~/MusicGenerator`).
 
 use std::path::{Path, PathBuf};
 
@@ -41,18 +41,13 @@ pub fn code_dir(resource_dir: Option<&Path>) -> Option<PathBuf> {
     candidates.into_iter().find(|p| is_project(p))
 }
 
-/// Datenordner: `MG_HOME` → gespeicherte Wahl → im Debug-Build das Repository → `~/MusicGenerator`.
+/// Datenordner: `MG_HOME` → gespeicherte Wahl → `~/MusicGenerator`. Auch beim Entwickeln nicht das Repository,
+/// damit dort keine Test-Engine eine fertige Installation vortäuscht.
 pub fn home_dir(saved: Option<&Path>) -> PathBuf {
     if let Some(p) = std::env::var_os("MG_HOME").filter(|p| !p.is_empty()) {
         return PathBuf::from(p);
     }
-    if let Some(p) = saved {
-        return p.to_path_buf();
-    }
-    if cfg!(debug_assertions) {
-        return repo_dir();
-    }
-    default_home()
+    saved.map(Path::to_path_buf).unwrap_or_else(default_home)
 }
 
 pub fn default_home() -> PathBuf {
