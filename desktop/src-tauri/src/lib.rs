@@ -7,6 +7,7 @@ mod i18n;
 mod installer;
 mod paths;
 mod settings;
+mod storage;
 mod supervisor;
 
 use std::collections::BTreeMap;
@@ -49,6 +50,12 @@ enum Status {
     /// Einrichtung läuft
     Installing {
         progress: installer::Progress,
+    },
+    /// Speicher & Modelle verwalten
+    Storage {
+        info: storage::Info,
+        /// zuletzt freigegebener Platz (Bytes) für die Meldung
+        freed: u64,
     },
     Ready,
 }
@@ -248,6 +255,137 @@ fn reveal_download(app: AppHandle, path: String) {
     }
 }
 
+// ------------------------------------------------------------------ Speicher & Modelle
+
+fn current_layout(app: &AppHandle) -> Option<Layout> {
+    app.state::<Shared>().layout.lock().unwrap().clone()
+}
+
+/// Server beenden (vor dem Löschen von Modellen: Windows sperrt geöffnete Dateien, der Server hält sie offen).
+fn stop_servers(app: &AppHandle) {
+    let sup = app.state::<Shared>().sup.lock().unwrap().take();
+    if let Some(sup) = sup {
+        sup.stop();
+    }
+}
+
+fn show_storage(app: &AppHandle, freed: u64) {
+    let Some(layout) = current_layout(app) else {
+        return;
+    };
+    let manifest = installer::load_manifest(&layout.code).unwrap_or_default();
+    set_status(
+        app,
+        Status::Storage {
+            info: storage::info(&layout.home, &manifest),
+            freed,
+        },
+    );
+    show_splash(app);
+}
+
+#[tauri::command]
+async fn open_storage(app: AppHandle) {
+    let _ = tauri::async_runtime::spawn_blocking(move || show_storage(&app, 0)).await;
+}
+
+/// Zurück zur Web-App; laufen die Server nicht mehr (nach dem Löschen), neu starten.
+#[tauri::command]
+fn close_storage(app: AppHandle, state: State<'_, Shared>) {
+    let sup = state.sup.lock().unwrap().clone();
+    match sup {
+        Some(sup) if supervisor::is_web_app(state.web_port) => {
+            set_status(&app, Status::Ready);
+            if let (Some(w), Ok(url)) = (app.get_webview_window(MAIN), Url::parse(&sup.url())) {
+                let _ = w.navigate(url);
+            }
+        }
+        _ => state.send(Cmd::Start),
+    }
+}
+
+#[derive(Serialize)]
+struct StorageSummary {
+    label: String,
+    button: String,
+    used_bytes: u64,
+}
+
+/// Für den Eintrag im Einstellungsdialog der Web-App (`webapp.js`).
+#[tauri::command]
+async fn storage_summary(app: AppHandle) -> StorageSummary {
+    let lang = app.state::<Shared>().lang();
+    let home = current_layout(&app).map(|l| l.home);
+    let used_bytes = tauri::async_runtime::spawn_blocking(move || {
+        home.map(|h| storage::used_bytes(&h)).unwrap_or(0)
+    })
+    .await
+    .unwrap_or(0);
+    StorageSummary {
+        label: i18n::t(&lang, "storage_title"),
+        button: i18n::t(&lang, "storage_manage"),
+        used_bytes,
+    }
+}
+
+#[tauri::command]
+async fn delete_model(app: AppHandle, name: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let layout = current_layout(&app).ok_or("kein Datenordner")?;
+        let manifest = installer::load_manifest(&layout.code)?;
+        stop_servers(&app);
+        let freed = storage::delete_model(&layout.home, &manifest, &name)?;
+        show_storage(&app, freed);
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn clear_cache(app: AppHandle) {
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        if let Some(layout) = current_layout(&app) {
+            let freed = storage::clear_cache(&layout.home);
+            show_storage(&app, freed);
+        }
+    })
+    .await;
+}
+
+/// Alles außer den Songs löschen und neu einrichten.
+#[tauri::command]
+async fn reset_all(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let layout = current_layout(&app).ok_or("kein Datenordner")?;
+        stop_servers(&app);
+        storage::reset(&layout.home)?;
+        app.state::<Shared>().send(Cmd::Start);
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Einrichtungsdialog für eine vorhandene Installation: anderes Sprachmodell oder XL nachladen.
+#[tauri::command]
+async fn change_models(app: AppHandle) {
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        if let Some(layout) = current_layout(&app) {
+            if let Ok(m) = installer::load_manifest(&layout.code) {
+                set_status(
+                    &app,
+                    Status::Setup {
+                        plan: installer::plan(&layout, &m),
+                    },
+                );
+                show_splash(&app);
+            }
+        }
+    })
+    .await;
+}
+
 // ------------------------------------------------------------------ Hilfen
 
 fn open_dir(app: &AppHandle, which: impl Fn(&std::path::Path) -> PathBuf) {
@@ -320,6 +458,7 @@ fn tray_menu(app: &AppHandle, lang: &str) -> tauri::Result<Menu<Wry>> {
             &item("open")?,
             &item("restart")?,
             &PredefinedMenuItem::separator(app)?,
+            &item("storage")?,
             &item("logs")?,
             &item("folder")?,
             &PredefinedMenuItem::separator(app)?,
@@ -463,6 +602,8 @@ fn install_now(app: &AppHandle, choice: &installer::Choice) {
         Ok(m) => m,
         Err(e) => return fail(app, Failure::new("err_spawn").arg("detail", e)),
     };
+    // laufende Server belegen Grafikspeicher, den der Grafiktest braucht
+    stop_servers(app);
     st.cancel_install.store(false, Ordering::SeqCst);
     let report = |progress: installer::Progress| set_status(app, Status::Installing { progress });
     let inst = installer::Installer {
@@ -532,7 +673,14 @@ pub fn run() {
             reveal_download,
             install,
             cancel_install,
-            choose_home
+            choose_home,
+            open_storage,
+            close_storage,
+            storage_summary,
+            delete_model,
+            clear_cache,
+            reset_all,
+            change_models
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -600,6 +748,10 @@ pub fn run() {
                 .on_menu_event(|app, ev| match ev.id().as_ref() {
                     "open" => show_main(app),
                     "restart" => app.state::<Shared>().send(Cmd::Start),
+                    "storage" => {
+                        let app = app.clone();
+                        tauri::async_runtime::spawn_blocking(move || show_storage(&app, 0));
+                    }
                     "logs" => open_dir(app, paths::data_dir),
                     "folder" => open_dir(app, |home| home.to_path_buf()),
                     "quit" => app.exit(0),

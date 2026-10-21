@@ -280,6 +280,8 @@ pub struct Plan {
     pub base_mb: u64,
     pub engine_available: bool,
     pub engine_present: bool,
+    /// schon eingerichtet (Aufruf aus „Speicher & Modelle“): Dialog zeigt „Zurück“
+    pub installed: bool,
 }
 
 pub fn plan(layout: &Layout, m: &Manifest) -> Plan {
@@ -326,6 +328,7 @@ pub fn plan(layout: &Layout, m: &Manifest) -> Plan {
         base_mb,
         engine_available: m.engine().is_some(),
         engine_present: paths::ace_server(home).is_some(),
+        installed: paths::is_installed(home),
     }
 }
 

@@ -36,6 +36,7 @@
       </div>
       <div class="buttons">
         <button id="install" class="primary" data-t="setup_install"></button>
+        <button id="setupBack" data-t="btn_back" hidden></button>
         <button id="quit2" data-t="btn_quit"></button>
       </div>
     </section>
@@ -44,6 +45,24 @@
       <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100"><div id="barFill"></div></div>
       <p id="instDetail" class="muted small-text"></p>
       <div class="buttons"><button id="cancel" data-t="setup_cancel"></button></div>
+    </section>
+    <section id="storage" hidden aria-labelledby="storageTitle">
+      <h2 id="storageTitle" data-t="storage_title"></h2>
+      <p class="muted small-text"><code id="stHome"></code></p>
+      <p id="stTotal" class="muted small-text"></p>
+      <p id="stFreed" class="ok small-text" role="status"></p>
+      <div class="card">
+        <table class="st">
+          <tbody id="stModels"></tbody>
+          <tbody id="stOther"></tbody>
+        </table>
+      </div>
+      <div class="buttons">
+        <button id="stBack" class="primary" data-t="btn_back"></button>
+        <button id="stChange" data-t="btn_change"></button>
+        <button id="stReset" class="danger" data-t="btn_reset"></button>
+      </div>
+      <p class="muted small-text" data-t="reset_hint"></p>
     </section>
     <section id="failed" hidden>
       <p id="error" class="error" role="alert"></p>

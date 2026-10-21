@@ -14,6 +14,12 @@
     "allow-quit",
     "allow-install",
     "allow-cancel-install",
-    "allow-choose-home"
+    "allow-choose-home",
+    "allow-open-storage",
+    "allow-close-storage",
+    "allow-delete-model",
+    "allow-clear-cache",
+    "allow-reset-all",
+    "allow-change-models"
   ]
 }

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "webapp",
-  "description": "Die lokale Web-App darf nur ihre Sprache melden und Downloads an die Hülle geben.",
+  "description": "Die lokale Web-App darf nur ihre Sprache melden, Downloads an die Hülle geben und die Speicherverwaltung öffnen.",
   "windows": [
     "main"
   ],
@@ -14,6 +14,8 @@
   "permissions": [
     "allow-set-lang",
     "allow-save-download",
-    "allow-reveal-download"
+    "allow-reveal-download",
+    "allow-storage-summary",
+    "allow-open-storage"
   ]
 }

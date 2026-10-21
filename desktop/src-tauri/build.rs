@@ -14,6 +14,13 @@ fn main() {
             "install",
             "cancel_install",
             "choose_home",
+            "open_storage",
+            "close_storage",
+            "storage_summary",
+            "delete_model",
+            "clear_cache",
+            "reset_all",
+            "change_models",
         ]),
     ))
     .expect("tauri-build fehlgeschlagen");

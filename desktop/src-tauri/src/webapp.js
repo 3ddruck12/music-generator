@@ -1,6 +1,7 @@
 // Läuft in jeder Seite des Hauptfensters, wirkt aber nur in der Web-App (localhost:__PORT__). Eingebunden von lib.rs.
 // 1. Meldet die Oberflächensprache an die Hülle (Tray und Startseite folgen).
 // 2. Leitet Downloads (Song, ZIP, Lyrics) an die Hülle, die sie im Downloads-Ordner speichert.
+// 3. Ergänzt im Einstellungsdialog den Eintrag „Speicher & Modelle“.
 (() => {
   if (!["localhost", "127.0.0.1"].includes(location.hostname) || location.port !== "__PORT__") return;
   window.__MG_DESKTOP__ = true;
@@ -12,7 +13,7 @@
       if (l) invoke("set_lang", { lang: l });
     } catch (e) {}
   };
-  document.addEventListener("langchange", sendLang);
+  document.addEventListener("langchange", () => { sendLang(); refreshStorage(); });
   window.addEventListener("load", sendLang);
 
   // --- Meldung unten in der Mitte, für Screenreader als Statusmeldung
@@ -58,5 +59,36 @@
     } catch (err) {
       toast(String(err), { error: true });
     }
+  });
+
+  // --- „Speicher & Modelle“ im Einstellungsdialog, vor „Server“ (Texte und Größe aus der Hülle)
+  let storageRow;
+  const gbText = (b) => `${(b / (1 << 30)).toLocaleString(document.documentElement.lang || undefined, { maximumFractionDigits: 1 })} GB`;
+  async function refreshStorage() {
+    if (!storageRow) return;
+    try {
+      const s = await invoke("storage_summary");
+      storageRow.querySelector(".lbl").textContent = s.label;
+      storageRow.querySelector("button").textContent = s.button;
+      storageRow.querySelector(".small").textContent = gbText(s.used_bytes);
+    } catch (e) {}
+  }
+  function addStorageRow() {
+    const stop = document.getElementById("stopBtn");
+    const field = stop && stop.closest(".field");
+    if (!field || storageRow) return;
+    storageRow = document.createElement("div");
+    storageRow.className = "field";
+    storageRow.innerHTML = '<span class="lbl"></span><div class="upd-row"><button type="button" class="sek"></button><span class="small"></span></div>';
+    storageRow.querySelector("button").onclick = () => {
+      document.getElementById("settingsDlg")?.close();
+      invoke("open_storage");
+    };
+    field.before(storageRow);
+    refreshStorage();
+  }
+  window.addEventListener("DOMContentLoaded", () => {
+    addStorageRow();
+    document.getElementById("btnSettings")?.addEventListener("click", refreshStorage);
   });
 })();

@@ -58,3 +58,14 @@ button:disabled { opacity: .5; cursor: default; }
 @keyframes busy { from { margin-left: -30%; } to { margin-left: 100%; } }
 #instStep { margin: 0; }
 .warn { color: #e0b25c; }
+table.st { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.st td { padding: 7px 4px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+table.st tbody:last-child tr:last-child td { border-bottom: 0; }
+table.st td.num { text-align: right; white-space: nowrap; color: var(--muted); font-variant-numeric: tabular-nums; }
+table.st td.act { text-align: right; width: 1%; white-space: nowrap; }
+table.st .file { display: block; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+table.st .on { color: var(--logo-text); font-size: 12px; }
+table.st tbody + tbody tr:first-child td { border-top: 2px solid var(--border); }
+button.danger { color: var(--error); }
+button.armed { color: var(--error); border-color: var(--error); background: rgba(255, 107, 107, .12); }
+.ok { color: #7fc79a; min-height: 1em; }
