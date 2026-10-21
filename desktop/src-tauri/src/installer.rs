@@ -708,6 +708,7 @@ impl Installer<'_> {
             .stdout(log.try_clone().unwrap())
             .stderr(log);
         supervisor::hide_console(&mut cmd);
+        paths::prepare(&mut cmd);
         let mut server = cmd
             .spawn()
             .map_err(|e| SetupError::new("setup_err_selftest", e))?;
@@ -749,10 +750,10 @@ impl Installer<'_> {
         let mut cmd = Command::new(program);
         cmd.args(args)
             .current_dir(&self.layout.code)
-            .env("PATH", paths::child_path())
             .stdin(Stdio::null())
             .stdout(log.try_clone().map_err(|e| e.to_string())?)
             .stderr(log);
+        paths::prepare(&mut cmd);
         for (k, v) in supervisor::python_env(self.layout) {
             cmd.env(k, v);
         }
@@ -807,6 +808,7 @@ fn run_capture(program: &str, args: &[&str]) -> Option<String> {
     let mut cmd = Command::new(path);
     cmd.args(args).stdin(Stdio::null()).stderr(Stdio::null());
     supervisor::hide_console(&mut cmd);
+    paths::prepare(&mut cmd);
     let out = cmd.output().ok()?;
     out.status
         .success()

@@ -6,7 +6,9 @@
 //!
 //! Bei Installationen über die Skripte sind beide Ordner derselbe (`~/MusicGenerator`).
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 /// Ordnername der Installer (`~/MusicGenerator`, `%USERPROFILE%\MusicGenerator`).
 const DEFAULT_DIR: &str = "MusicGenerator";
@@ -139,13 +141,62 @@ pub fn extra_path_dirs() -> Vec<PathBuf> {
     v
 }
 
-/// PATH für Kindprozesse: Zusatzorte vor dem geerbten PATH.
-pub fn child_path() -> std::ffi::OsString {
+/// PATH für Kindprozesse: Zusatzorte vor dem geerbten PATH (ohne Ordner im AppImage).
+pub fn child_path() -> OsString {
+    let appdir = appimage_dir();
     let mut dirs = extra_path_dirs();
     if let Some(p) = std::env::var_os("PATH") {
-        dirs.extend(std::env::split_paths(&p));
+        dirs.extend(
+            std::env::split_paths(&p).filter(|d| appdir.as_ref().is_none_or(|a| !d.starts_with(a))),
+        );
     }
     std::env::join_paths(dirs).unwrap_or_default()
+}
+
+/// Läuft die App als AppImage, dessen eingehängter Ordner (`APPDIR`, nur wenn die App wirklich darin liegt).
+pub fn appimage_dir() -> Option<PathBuf> {
+    let appdir = PathBuf::from(std::env::var_os("APPDIR")?);
+    let exe = std::env::current_exe().ok()?;
+    exe.starts_with(&appdir).then_some(appdir)
+}
+
+/// Umgebung eines Kindprozesses (Python, uv, Modellserver) vorbereiten: erweiterter PATH, und im AppImage alle Pfade
+/// entfernen, die in das AppImage zeigen. Dessen Starter setzt u. a. `PYTHONHOME`, `PYTHONPATH` und `LD_LIBRARY_PATH`
+/// darauf; Python fände sonst seine Standardbibliothek nicht („Failed to import encodings module“).
+pub fn prepare(cmd: &mut Command) {
+    if let Some(appdir) = appimage_dir() {
+        for (k, v) in appimage_env_fixes(std::env::vars_os(), &appdir) {
+            match v {
+                Some(v) => cmd.env(k, v),
+                None => cmd.env_remove(k),
+            };
+        }
+    }
+    cmd.env("PATH", child_path());
+}
+
+/// Änderungen an der Umgebung: `None` = Variable entfernen, `Some` = neuer Wert ohne die AppImage-Pfade.
+pub fn appimage_env_fixes(
+    vars: impl IntoIterator<Item = (OsString, OsString)>,
+    appdir: &Path,
+) -> Vec<(OsString, Option<OsString>)> {
+    let inside = appdir.to_string_lossy().into_owned();
+    let mut out = Vec::new();
+    for (k, v) in vars {
+        if k == "PYTHONHOME" || k == "PYTHONPATH" {
+            out.push((k, None));
+            continue;
+        }
+        if !v.to_string_lossy().contains(inside.as_str()) {
+            continue;
+        }
+        let kept: Vec<PathBuf> = std::env::split_paths(&v)
+            .filter(|p| !p.as_os_str().is_empty() && !p.starts_with(appdir))
+            .collect();
+        let value = (!kept.is_empty()).then(|| std::env::join_paths(kept).unwrap_or_default());
+        out.push((k, value));
+    }
+    out
 }
 
 /// `uv`: zuerst das mit der App ausgelieferte `mg-uv` (neben der ausführbaren Datei; eigener Name, damit es unter
@@ -214,5 +265,52 @@ mod tests {
             &Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
         ));
         assert!(!is_project(Path::new(env!("CARGO_MANIFEST_DIR"))));
+        assert_eq!(code_dir(None), Some(repo_dir()));
+    }
+
+    #[test]
+    fn layout_bundled() {
+        let l = Layout {
+            code: "/a".into(),
+            home: "/a".into(),
+        };
+        assert!(!l.bundled());
+        assert!(Layout {
+            home: "/b".into(),
+            ..l
+        }
+        .bundled());
+    }
+
+    #[test]
+    fn appimage_paths_are_removed() {
+        let a = Path::new("/tmp/.mount_Music123");
+        let vars = [
+            ("PYTHONHOME", "/tmp/.mount_Music123/usr/"),
+            ("PYTHONPATH", "/tmp/.mount_Music123/usr/share/pyshared/:"),
+            (
+                "LD_LIBRARY_PATH",
+                "/tmp/.mount_Music123//usr/lib/:/opt/rocm/lib",
+            ),
+            (
+                "GST_PLUGIN_SYSTEM_PATH_1_0",
+                "/tmp/.mount_Music123/usr/lib/gstreamer-1.0:",
+            ),
+            ("HOME", "/home/x"),
+        ]
+        .map(|(k, v)| (OsString::from(k), OsString::from(v)));
+        let fixes: std::collections::HashMap<_, _> =
+            appimage_env_fixes(vars, a).into_iter().collect();
+        assert_eq!(fixes[&OsString::from("PYTHONHOME")], None);
+        assert_eq!(fixes[&OsString::from("PYTHONPATH")], None);
+        assert_eq!(
+            fixes[&OsString::from("LD_LIBRARY_PATH")],
+            Some(OsString::from("/opt/rocm/lib"))
+        );
+        assert_eq!(fixes[&OsString::from("GST_PLUGIN_SYSTEM_PATH_1_0")], None);
+        assert!(
+            !fixes.contains_key(&OsString::from("HOME")),
+            "fremde Variablen bleiben"
+        );
     }
 }
