@@ -907,7 +907,11 @@ mod tests {
         assert!(mac.url.ends_with(".zip"));
         assert_eq!(m.var("ENGINE_MAC_MIN_OS"), Some("26"));
         let linux = m.engine_for("ENGINE_LINUX").expect("Linux-Engine");
-        assert_eq!(linux.rev, &m.acestep_rev[..7], "Linux-Engine passt zur ACESTEP_REV");
+        assert_eq!(
+            linux.rev,
+            &m.acestep_rev[..7],
+            "Linux-Engine passt zur ACESTEP_REV"
+        );
     }
 
     #[test]
