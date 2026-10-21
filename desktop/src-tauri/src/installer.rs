@@ -824,22 +824,36 @@ pub fn sha256_file(path: &Path) -> std::io::Result<String> {
     Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
-/// Entpacken mit Schutz vor Pfaden außerhalb des Ziels; Unix-Rechte (ausführbar) bleiben erhalten.
+/// Entpacken mit Schutz vor Pfaden außerhalb des Ziels; Unix-Rechte (ausführbar) und symbolische Links
+/// (z. B. `libggml.so.0` → `libggml.so.0.25.1`) bleiben erhalten.
 pub fn unzip(zip: &Path, dest: &Path) -> Result<(), String> {
     let mut archive = zip::ZipArchive::new(File::open(zip).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
+    let mut links: Vec<(PathBuf, String)> = Vec::new();
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
         let Some(rel) = entry.enclosed_name() else {
             continue;
         };
-        let out = dest.join(rel);
+        let out = dest.join(&rel);
         if entry.is_dir() {
             std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
             continue;
         }
         if let Some(p) = out.parent() {
             std::fs::create_dir_all(p).map_err(|e| e.to_string())?;
+        }
+        // Link: der Inhalt ist der Zielname. Nur Namen im selben Ordner, nichts, was hinauszeigt.
+        if entry.unix_mode().is_some_and(|m| m & 0o170000 == 0o120000) {
+            let mut target = String::new();
+            entry
+                .read_to_string(&mut target)
+                .map_err(|e| e.to_string())?;
+            if target.is_empty() || target.contains(['/', '\\']) || target == ".." {
+                return Err(format!("unzulässiger Link {} -> {target}", rel.display()));
+            }
+            links.push((out, target));
+            continue;
         }
         let mut f = File::create(&out).map_err(|e| e.to_string())?;
         std::io::copy(&mut entry, &mut f).map_err(|e| e.to_string())?;
@@ -848,6 +862,14 @@ pub fn unzip(zip: &Path, dest: &Path) -> Result<(), String> {
             use std::os::unix::fs::PermissionsExt;
             let _ = std::fs::set_permissions(&out, std::fs::Permissions::from_mode(mode & 0o777));
         }
+    }
+    // Links zuletzt anlegen, wenn ihre Ziele da sind. Ohne Link-Unterstützung (Windows): Ziel kopieren.
+    for (link, target) in links {
+        let _ = std::fs::remove_file(&link);
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, &link).map_err(|e| e.to_string())?;
+        #[cfg(not(unix))]
+        std::fs::copy(link.with_file_name(&target), &link).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -990,6 +1012,11 @@ mod tests {
             let opts = zip::write::SimpleFileOptions::default().unix_permissions(0o755);
             w.start_file("pkg-1/ace-server", opts).unwrap();
             w.write_all(b"#!/bin/sh\n").unwrap();
+            // Link vor seinem Ziel, wie zip -y es auch schreiben kann
+            w.add_symlink("pkg-1/libx.so.0", "libx.so.0.1", opts)
+                .unwrap();
+            w.start_file("pkg-1/libx.so.0.1", opts).unwrap();
+            w.write_all(b"ELF-Bibliothek").unwrap();
             w.start_file("../evil", opts).unwrap();
             w.write_all(b"x").unwrap();
             w.finish().unwrap();
@@ -999,6 +1026,26 @@ mod tests {
         assert!(!t.path().join("evil").exists(), "Pfad außerhalb des Ziels");
         let sub = single_subdir(&out).unwrap();
         assert!(sub.join("ace-server").is_file());
+        assert_eq!(
+            std::fs::read(sub.join("libx.so.0")).unwrap(),
+            b"ELF-Bibliothek"
+        );
+        #[cfg(unix)]
+        assert!(std::fs::symlink_metadata(sub.join("libx.so.0"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+
+        // Link, der aus dem Ordner zeigt: abgelehnt
+        let bad = t.path().join("bad.zip");
+        {
+            let mut w = zip::ZipWriter::new(File::create(&bad).unwrap());
+            let opts = zip::write::SimpleFileOptions::default();
+            w.add_symlink("raus", "../../etc/passwd", opts).unwrap();
+            w.finish().unwrap();
+        }
+        let e = unzip(&bad, &t.path().join("bad")).unwrap_err();
+        assert!(e.contains("unzulässiger Link"), "{e}");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
