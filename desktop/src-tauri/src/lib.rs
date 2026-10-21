@@ -1,5 +1,5 @@
 //! Desktop-Hülle für den Music Generator: startet die Server, zeigt die Web-App im eigenen Fenster und beendet
-//! beim Schließen alles wieder. Ablauf und Entscheidungen: `docs/desktop-plan.md`.
+//! beim Schließen alles wieder. Beim ersten Start richtet sie Modellserver und Modelle ein (`installer.rs`).
 
 mod config;
 mod downloads;
