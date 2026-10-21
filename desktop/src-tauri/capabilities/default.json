@@ -11,6 +11,9 @@
     "allow-retry",
     "allow-open-logs",
     "allow-open-folder",
-    "allow-quit"
+    "allow-quit",
+    "allow-install",
+    "allow-cancel-install",
+    "allow-choose-home"
   ]
 }

@@ -210,6 +210,19 @@ lädt und „Generieren“ den Fake-Server erreicht. Optional in Phase 3.
 5. **Bundle-ID**: `io.github.ddruck12.musicgenerator`. `3ddruck12` geht nicht, weil der Name unter Linux ein D-Bus-Name
    ist und ein Teil dort nicht mit einer Ziffer beginnen darf.
 
+## Phase 5: Einrichtung in der App (Weg 2, entschieden 2026-10-21)
+
+- **Ordner**: Programmcode wird mit der App ausgeliefert (Ressourcen `project/`, schreibgeschützt). Daten liegen im
+  Datenordner, Standard `~/MusicGenerator` (wie die Skripte; vorhandene Installationen werden genutzt, änderbar im Dialog):
+  `engine/`, `data/`, `.venv`. Das Backend bekommt `MG_HOME`, uv bekommt `UV_PROJECT_ENVIRONMENT`. Beim Entwickeln sind
+  beide Ordner das Repository.
+- **Ablauf** (`installer.rs`, Daten aus `scripts/common.sh`): fertige Engine laden (Windows/Mac: Releases des Originals,
+  Linux: eigene Vulkan-Version, `ENGINE_LINUX_*` in `common.sh`) → Modelle mit Fortsetzen + SHA-256 → `uv sync` →
+  Grafiktest mit `scripts/metal_selftest.py` (Ergebnis wird wiederverwendet wie in den Skripten) → `data/engine.conf`.
+- **Empfehlung** wie in den Installern: Sprachmodell nach RAM, begrenzt durch VRAM; `VAE_CHUNK` nach RAM (Mac) bzw. VRAM.
+- **Updates**: In der installierten App ist der Git-Updater aus (Meldung „Updates kommen mit der Desktop-App“).
+- **uv** wird als Sidecar mit der App ausgeliefert (CI lädt uv je Plattform), sonst aus dem PATH.
+
 ## Noch offen
 
 - **Updates**: Soll der Code-Updater (`git pull`) auf den Fork zeigen? Soll die Hülle zusätzlich über den Tauri-Updater

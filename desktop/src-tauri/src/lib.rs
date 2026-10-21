@@ -4,12 +4,14 @@
 mod config;
 mod downloads;
 mod i18n;
+mod installer;
 mod paths;
 mod settings;
 mod supervisor;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -22,6 +24,7 @@ use tauri::{
 };
 use tauri_plugin_opener::OpenerExt;
 
+use paths::Layout;
 use supervisor::{Event, Failure, Role, Supervisor};
 
 const MAIN: &str = "main";
@@ -39,11 +42,20 @@ enum Status {
         log: Option<String>,
         tail: String,
     },
+    /// Noch nicht eingerichtet: Einrichtungsdialog mit Vorschlag
+    Setup {
+        plan: installer::Plan,
+    },
+    /// Einrichtung läuft
+    Installing {
+        progress: installer::Progress,
+    },
     Ready,
 }
 
 enum Cmd {
     Start,
+    Install(installer::Choice),
 }
 
 struct Shared {
@@ -52,9 +64,13 @@ struct Shared {
     lang: Mutex<String>,
     tx: Mutex<Sender<Cmd>>,
     splash_url: Mutex<Option<Url>>,
-    root: Mutex<Option<PathBuf>>,
+    /// Programmcode (mitgelieferte Ressourcen bzw. Repository)
+    code: Option<PathBuf>,
+    layout: Mutex<Option<Layout>>,
+    settings: Mutex<settings::Settings>,
     settings_path: Option<PathBuf>,
     web_port: u16,
+    cancel_install: AtomicBool,
 }
 
 impl Shared {
@@ -63,6 +79,13 @@ impl Shared {
     }
     fn send(&self, cmd: Cmd) {
         let _ = self.tx.lock().unwrap().send(cmd);
+    }
+    fn save_settings(&self, change: impl FnOnce(&mut settings::Settings)) {
+        let mut s = self.settings.lock().unwrap();
+        change(&mut s);
+        if let Some(p) = &self.settings_path {
+            settings::save(p, &s);
+        }
     }
 }
 
@@ -97,7 +120,44 @@ fn open_logs(app: AppHandle) {
 
 #[tauri::command]
 fn open_folder(app: AppHandle) {
-    open_dir(&app, |root| root.to_path_buf());
+    open_dir(&app, |home| home.to_path_buf());
+}
+
+/// Einrichtung mit der gewählten Sprachmodellgröße (und optional XL) starten.
+#[tauri::command]
+fn install(state: State<'_, Shared>, choice: installer::Choice) {
+    state.send(Cmd::Install(choice));
+}
+
+#[tauri::command]
+fn cancel_install(state: State<'_, Shared>) {
+    state.cancel_install.store(true, Ordering::SeqCst);
+}
+
+/// Anderen Datenordner wählen (Engine, Modelle, Songs). Ein Ordner mit vorhandener Installation wird direkt genutzt.
+#[tauri::command]
+async fn choose_home(app: AppHandle) {
+    use tauri_plugin_dialog::DialogExt;
+    let st = app.state::<Shared>();
+    let current = st.layout.lock().unwrap().as_ref().map(|l| l.home.clone());
+    let mut dialog = app.dialog().file();
+    if let Some(dir) = current.as_ref().and_then(|h| h.parent()) {
+        dialog = dialog.set_directory(dir);
+    }
+    let Some(picked) = dialog
+        .blocking_pick_folder()
+        .and_then(|p| p.into_path().ok())
+    else {
+        return;
+    };
+    // leerer oder neuer Ordner → Unterordner „MusicGenerator“, damit nichts im gewählten Ordner verstreut wird
+    let home = if paths::is_installed(&picked) || picked.ends_with("MusicGenerator") {
+        picked
+    } else {
+        picked.join("MusicGenerator")
+    };
+    st.save_settings(|s| s.home = Some(home));
+    st.send(Cmd::Start);
 }
 
 #[tauri::command]
@@ -112,14 +172,7 @@ fn set_lang(app: AppHandle, state: State<'_, Shared>, lang: String) {
         return;
     }
     *state.lang.lock().unwrap() = lang.clone();
-    if let Some(p) = &state.settings_path {
-        settings::save(
-            p,
-            &settings::Settings {
-                lang: Some(lang.clone()),
-            },
-        );
-    }
+    state.save_settings(|s| s.lang = Some(lang.clone()));
     if let (Some(tray), Ok(menu)) = (app.tray_by_id(TRAY), tray_menu(&app, &lang)) {
         let _ = tray.set_menu(Some(menu));
     }
@@ -198,9 +251,9 @@ fn reveal_download(app: AppHandle, path: String) {
 // ------------------------------------------------------------------ Hilfen
 
 fn open_dir(app: &AppHandle, which: impl Fn(&std::path::Path) -> PathBuf) {
-    let root = app.state::<Shared>().root.lock().unwrap().clone();
-    if let Some(root) = root {
-        let dir = which(&root);
+    let layout = app.state::<Shared>().layout.lock().unwrap().clone();
+    if let Some(layout) = layout {
+        let dir = which(&layout.home);
         let _ = std::fs::create_dir_all(&dir);
         let _ = app.opener().open_path(dir.to_string_lossy(), None::<&str>);
     }
@@ -331,6 +384,7 @@ fn controller(app: AppHandle, rx: Receiver<Cmd>) {
     loop {
         match rx.recv_timeout(Duration::from_millis(500)) {
             Ok(Cmd::Start) => start(&app),
+            Ok(Cmd::Install(choice)) => install_now(&app, &choice),
             Err(RecvTimeoutError::Timeout) => watch(&app),
             Err(RecvTimeoutError::Disconnected) => return,
         }
@@ -351,16 +405,30 @@ fn start(app: &AppHandle) {
         },
     );
 
-    let Some(root) = paths::project_dir(None) else {
-        let expected = dirs::home_dir().unwrap_or_default().join("MusicGenerator");
-        fail(
-            app,
-            Failure::new("err_no_project").arg("path", expected.to_string_lossy()),
-        );
+    let Some(code) = st.code.clone() else {
+        fail(app, Failure::new("err_no_project").arg("path", "project"));
         return;
     };
-    *st.root.lock().unwrap() = Some(root.clone());
-    let sup = Arc::new(Supervisor::new(root));
+    let saved_home = st.settings.lock().unwrap().home.clone();
+    let layout = Layout {
+        code: code.clone(),
+        home: paths::home_dir(saved_home.as_deref()),
+    };
+    *st.layout.lock().unwrap() = Some(layout.clone());
+
+    if !paths::is_installed(&layout.home) {
+        match installer::load_manifest(&code) {
+            Ok(m) => set_status(
+                app,
+                Status::Setup {
+                    plan: installer::plan(&layout, &m),
+                },
+            ),
+            Err(e) => fail(app, Failure::new("err_spawn").arg("detail", e)),
+        }
+        return;
+    }
+    let sup = Arc::new(Supervisor::new(layout));
     *st.sup.lock().unwrap() = Some(sup.clone());
 
     match sup.start(&|step| {
@@ -383,6 +451,36 @@ fn start(app: &AppHandle) {
             *st.sup.lock().unwrap() = None;
             fail(app, f);
         }
+    }
+}
+
+fn install_now(app: &AppHandle, choice: &installer::Choice) {
+    let st = app.state::<Shared>();
+    let Some(layout) = st.layout.lock().unwrap().clone() else {
+        return;
+    };
+    let manifest = match installer::load_manifest(&layout.code) {
+        Ok(m) => m,
+        Err(e) => return fail(app, Failure::new("err_spawn").arg("detail", e)),
+    };
+    st.cancel_install.store(false, Ordering::SeqCst);
+    let report = |progress: installer::Progress| set_status(app, Status::Installing { progress });
+    let inst = installer::Installer {
+        layout: &layout,
+        manifest: &manifest,
+        cancel: &st.cancel_install,
+        report: &report,
+    };
+    match inst.run(choice) {
+        // fertig → normal starten; abgebrochen → zurück zum Einrichtungsdialog (Downloads setzen später fort)
+        Ok(()) => start(app),
+        Err(e) if e.key == "setup_err_cancelled" => start(app),
+        Err(e) => fail(
+            app,
+            Failure::new(e.key)
+                .arg("detail", e.detail)
+                .log(paths::data_dir(&layout.home).join("setup.log")),
+        ),
     }
 }
 
@@ -422,6 +520,7 @@ pub fn run() {
             show_main(app)
         }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             splash_state,
             retry,
@@ -430,7 +529,10 @@ pub fn run() {
             quit,
             set_lang,
             save_download,
-            reveal_download
+            reveal_download,
+            install,
+            cancel_install,
+            choose_home
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -444,8 +546,10 @@ pub fn run() {
                 .map(settings::load)
                 .unwrap_or_default();
             let lang = i18n::detect(saved.lang.as_deref());
-            let web_port = paths::project_dir(None)
-                .map(|r| config::load_ports(&r))
+            let code = paths::code_dir(app.path().resource_dir().ok().as_deref());
+            let web_port = code
+                .as_deref()
+                .map(config::load_ports)
                 .unwrap_or_default()
                 .web;
 
@@ -458,9 +562,12 @@ pub fn run() {
                 lang: Mutex::new(lang.clone()),
                 tx: Mutex::new(tx),
                 splash_url: Mutex::new(None),
-                root: Mutex::new(None),
+                code,
+                layout: Mutex::new(None),
+                settings: Mutex::new(saved),
                 settings_path,
                 web_port,
+                cancel_install: AtomicBool::new(false),
             });
 
             let nav_app = handle.clone();
@@ -494,7 +601,7 @@ pub fn run() {
                     "open" => show_main(app),
                     "restart" => app.state::<Shared>().send(Cmd::Start),
                     "logs" => open_dir(app, paths::data_dir),
-                    "folder" => open_dir(app, |root| root.to_path_buf()),
+                    "folder" => open_dir(app, |home| home.to_path_buf()),
                     "quit" => app.exit(0),
                     _ => {}
                 })

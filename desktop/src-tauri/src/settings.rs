@@ -8,6 +8,9 @@ pub struct Settings {
     /// zuletzt in der Web-App gewählte Oberflächensprache
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lang: Option<String>,
+    /// gewählter Datenordner (Engine, Modelle, Songs); fehlt = `~/MusicGenerator`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home: Option<std::path::PathBuf>,
 }
 
 pub fn load(path: &Path) -> Settings {
@@ -39,9 +42,11 @@ mod tests {
             &p,
             &Settings {
                 lang: Some("uk".into()),
+                home: Some("/daten/MusicGenerator".into()),
             },
         );
         assert_eq!(load(&p).lang.as_deref(), Some("uk"));
+        assert_eq!(load(&p).home, Some("/daten/MusicGenerator".into()));
         std::fs::write(&p, "{kaputt").unwrap();
         assert_eq!(load(&p), Settings::default());
     }

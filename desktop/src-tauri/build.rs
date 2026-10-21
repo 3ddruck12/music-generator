@@ -11,6 +11,9 @@ fn main() {
             "set_lang",
             "save_download",
             "reveal_download",
+            "install",
+            "cancel_install",
+            "choose_home",
         ]),
     ))
     .expect("tauri-build fehlgeschlagen");

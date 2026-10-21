@@ -220,9 +220,17 @@ mod tests {
         let port = l.local_addr().unwrap().port();
         std::thread::spawn(move || {
             let (mut c, _) = l.accept().unwrap();
+            // ganze Anfrage lesen, sonst setzt das Schließen die Verbindung zurück (RST) und die Antwort geht verloren
+            let mut req = Vec::new();
             let mut buf = [0u8; 1024];
-            let _ = c.read(&mut buf);
+            while !req.windows(4).any(|w| w == b"\r\n\r\n") {
+                match c.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => req.extend_from_slice(&buf[..n]),
+                }
+            }
             c.write_all(response).unwrap();
+            let _ = c.shutdown(std::net::Shutdown::Write);
         });
         port
     }

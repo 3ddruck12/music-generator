@@ -11,11 +11,13 @@ import signal
 from . import db
 
 ACTIVE = os.environ.get("MG_DESKTOP") == "1"
+# Installierte Desktop-App: Programmcode liegt getrennt von den Daten (MG_HOME) und wird mit der App aktualisiert, nicht per Git.
+BUNDLED = ACTIVE and db.HOME != db.ROOT
 EXIT_FILE = db.DATA / "desktop-exit"
 
 
 def exit_now(action: str) -> None:
-    db.DATA.mkdir(exist_ok=True)
+    db.DATA.mkdir(parents=True, exist_ok=True)
     EXIT_FILE.write_text(action)
     os.kill(os.getpid(), signal.SIGTERM)
 

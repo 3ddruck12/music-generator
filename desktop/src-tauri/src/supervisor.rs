@@ -13,7 +13,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use crate::config::{self, EngineConf, Mode, Ports};
-use crate::paths;
+use crate::paths::{self, Layout};
 
 /// Datei, in der die Web-App im Desktop-Modus hinterlässt, was nach ihrem Ende passieren soll (`app/desktop.py`).
 pub const EXIT_FILE: &str = "desktop-exit";
@@ -102,17 +102,17 @@ struct Proc {
 }
 
 pub struct Supervisor {
-    root: PathBuf,
+    layout: Layout,
     ports: Ports,
     procs: Mutex<Vec<Proc>>,
     cancel: AtomicBool,
 }
 
 impl Supervisor {
-    pub fn new(root: PathBuf) -> Self {
-        let ports = config::load_ports(&root);
+    pub fn new(layout: Layout) -> Self {
+        let ports = config::load_ports(&layout.code);
         Supervisor {
-            root,
+            layout,
             ports,
             procs: Mutex::new(Vec::new()),
             cancel: AtomicBool::new(false),
@@ -125,7 +125,7 @@ impl Supervisor {
     }
 
     pub fn data_dir(&self) -> PathBuf {
-        paths::data_dir(&self.root)
+        paths::data_dir(&self.layout.home)
     }
 
     fn log_path(&self, role: Role) -> PathBuf {
@@ -136,16 +136,17 @@ impl Supervisor {
     pub fn start(&self, report: &dyn Fn(Step)) -> Result<(), Failure> {
         self.cancel.store(false, Ordering::SeqCst);
         report(Step::Check);
-        let ace = paths::ace_server(&self.root)
+        let home = &self.layout.home;
+        let ace = paths::ace_server(home)
             .ok_or_else(|| Failure::new("err_not_installed").arg("missing", "ace-server"))?;
-        let missing = paths::missing_models(&self.root);
+        let missing = paths::missing_models(home);
         if !missing.is_empty() {
             return Err(Failure::new("err_not_installed").arg("missing", missing.join(", ")));
         }
-        let uv = paths::which("uv").ok_or_else(|| Failure::new("err_no_uv"))?;
+        let uv = paths::uv().ok_or_else(|| Failure::new("err_no_uv"))?;
         std::fs::create_dir_all(self.data_dir())
             .map_err(|e| Failure::new("err_spawn").arg("detail", e.to_string()))?;
-        let conf = config::load_engine_conf(&self.root);
+        let conf = config::load_engine_conf(home);
 
         // Belegte Ports: Läuft dort schon unser Server (z. B. per ON-Skript gestartet), wird er übernommen.
         let synth_up = port_open(self.ports.synth);
@@ -155,10 +156,10 @@ impl Supervisor {
             return Err(Failure::new("err_port_foreign").arg("port", self.ports.web.to_string()));
         }
         if !synth_up && !lm_up {
-            repair_mac_rpaths(&self.root);
+            repair_mac_rpaths(&self.layout);
         }
 
-        let base = server_args(&paths::models_dir(&self.root), &conf);
+        let base = server_args(&paths::models_dir(home), &conf);
         if conf.mode == Mode::Split && !lm_up {
             report(Step::Lm);
             let mut args = vec![
@@ -222,19 +223,16 @@ impl Supervisor {
 
     fn spawn_web(&self, uv: &Path) -> Result<(), Failure> {
         let _ = std::fs::remove_file(self.data_dir().join(EXIT_FILE));
-        let args: Vec<OsString> = [
-            "run",
-            "uvicorn",
-            "app.main:app",
-            "--host",
-            "127.0.0.1",
-            "--port",
-        ]
-        .iter()
-        .map(OsString::from)
-        .chain([OsString::from(self.ports.web.to_string())])
-        .collect();
-        self.spawn(Role::Web, uv, &args, &[("MG_DESKTOP", "1".into())])
+        let mut args = uv_run_args(&self.layout);
+        args.extend(
+            ["uvicorn", "app.main:app", "--host", "127.0.0.1", "--port"]
+                .iter()
+                .map(OsString::from),
+        );
+        args.push(self.ports.web.to_string().into());
+        let mut env = python_env(&self.layout);
+        env.push(("MG_DESKTOP", "1".into()));
+        self.spawn(Role::Web, uv, &args, &env)
     }
 
     fn spawn(
@@ -254,7 +252,7 @@ impl Supervisor {
         let err = out.try_clone().map_err(fail)?;
         let mut cmd = Command::new(program);
         cmd.args(args)
-            .current_dir(&self.root)
+            .current_dir(&self.layout.code)
             .env("PATH", paths::child_path())
             .stdin(Stdio::null())
             .stdout(out)
@@ -265,7 +263,7 @@ impl Supervisor {
         for (k, v) in env {
             cmd.env(k, v);
         }
-        detach_from_console(&mut cmd);
+        hide_console(&mut cmd);
         #[cfg(target_os = "linux")]
         {
             use std::os::unix::process::CommandExt;
@@ -315,7 +313,7 @@ impl Supervisor {
 
     /// Nur die Web-App neu starten (nach einem Update aus der App heraus).
     pub fn restart_web(&self) -> Result<(), Failure> {
-        let uv = paths::which("uv").ok_or_else(|| Failure::new("err_no_uv"))?;
+        let uv = paths::uv().ok_or_else(|| Failure::new("err_no_uv"))?;
         let deadline = Instant::now() + Duration::from_secs(10);
         while port_open(self.ports.web) && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(200));
@@ -393,7 +391,7 @@ fn engine_env() -> Vec<(&'static str, OsString)> {
 fn help_mentions(ace: &Path, flag: &str) -> bool {
     let mut cmd = Command::new(ace);
     cmd.arg("--help").stdin(Stdio::null());
-    detach_from_console(&mut cmd);
+    hide_console(&mut cmd);
     cmd.output()
         .map(|o| {
             String::from_utf8_lossy(&o.stdout).contains(flag)
@@ -402,12 +400,40 @@ fn help_mentions(ace: &Path, flag: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Mac: verschobener Projektordner → rpath der Engine reparieren (`pfade_reparieren` aus `common.sh`).
-fn repair_mac_rpaths(root: &Path) {
+/// `uv run` im Programmordner. Installierte App: Lockdatei nicht anfassen (Programmordner ist schreibgeschützt).
+pub fn uv_run_args(layout: &Layout) -> Vec<OsString> {
+    let mut v = vec![OsString::from("run")];
+    if layout.bundled() {
+        v.push("--frozen".into());
+    }
+    v
+}
+
+/// Umgebung für Python: Datenordner und Python-Umgebung liegen bei getrennten Ordnern im Datenordner.
+pub fn python_env(layout: &Layout) -> Vec<(&'static str, OsString)> {
+    if !layout.bundled() {
+        return Vec::new();
+    }
+    vec![
+        ("MG_HOME", layout.home.clone().into_os_string()),
+        (
+            "UV_PROJECT_ENVIRONMENT",
+            layout.home.join(".venv").into_os_string(),
+        ),
+        ("PYTHONDONTWRITEBYTECODE", "1".into()),
+    ]
+}
+
+/// Mac: verschobener Datenordner → rpath der Engine reparieren (`pfade_reparieren` aus `common.sh`).
+fn repair_mac_rpaths(layout: &Layout) {
     if cfg!(target_os = "macos") {
         let _ = Command::new("/bin/bash")
-            .args(["-c", "source scripts/common.sh && pfade_reparieren"])
-            .current_dir(root)
+            .args([
+                "-c",
+                "source scripts/common.sh && ENGINE=\"$MG_ENGINE\" && pfade_reparieren",
+            ])
+            .env("MG_ENGINE", paths::engine_dir(&layout.home))
+            .current_dir(&layout.code)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -460,7 +486,7 @@ pub fn tail(path: &Path, lines: usize) -> String {
 
 /// Unix: eigene Prozessgruppe, damit `uv` samt Python-Kind gemeinsam beendet wird.
 /// Windows: kein Konsolenfenster.
-fn detach_from_console(cmd: &mut Command) {
+pub fn hide_console(cmd: &mut Command) {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -502,7 +528,7 @@ fn terminate(child: &mut Child) {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        detach_from_console(&mut cmd);
+        hide_console(&mut cmd);
         let _ = cmd.status();
     }
     let _ = child.kill();
@@ -618,7 +644,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn start_and_desktop_shutdown() {
-        if paths::which("uv").is_none() {
+        if paths::uv().is_none() {
             eprintln!("uv fehlt, Test übersprungen");
             return;
         }
@@ -630,7 +656,10 @@ mod tests {
             "#!/bin/sh\nexec python3 '{}' \"$@\"\n",
             fake.display()
         ));
-        let sup = Supervisor::new(t.path().to_path_buf());
+        let sup = Supervisor::new(Layout {
+            code: t.path().to_path_buf(),
+            home: t.path().to_path_buf(),
+        });
         let steps = Mutex::new(Vec::new());
         sup.start(&|s| steps.lock().unwrap().push(s))
             .unwrap_or_else(|f| {
@@ -669,7 +698,10 @@ mod tests {
     #[test]
     fn crashing_engine_reports_log() {
         let (t, _) = fake_project("#!/bin/sh\necho kaputt >&2\nexit 3\n");
-        let sup = Supervisor::new(t.path().to_path_buf());
+        let sup = Supervisor::new(Layout {
+            code: t.path().to_path_buf(),
+            home: t.path().to_path_buf(),
+        });
         let started = Instant::now();
         let f = sup.start(&|_| {}).unwrap_err();
         assert!(started.elapsed() < Duration::from_secs(20));

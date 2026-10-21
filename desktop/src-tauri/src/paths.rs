@@ -1,35 +1,74 @@
-//! Projektordner, Engine, Modelle und `uv` finden – dieselben Orte wie die Installer und ON-Skripte.
+//! Wo was liegt. Die App trennt zwei Ordner:
+//! - **Programmcode** (`code`): Web-App, Oberfläche, `scripts/common.sh`. In der installierten App die mitgelieferten
+//!   Ressourcen (schreibgeschützt), beim Entwickeln das Repository.
+//! - **Datenordner** (`home`): `engine/` (Modellserver und Modelle), `data/` (Songs, Datenbank, Logs), `.venv`.
+//!   Standard `~/MusicGenerator` – derselbe Ordner wie bei den Installer-Skripten, vorhandene Installationen werden genutzt.
+//!
+//! Beim Entwickeln (und bei Installationen über die Skripte) sind beide Ordner derselbe.
 
 use std::path::{Path, PathBuf};
 
 /// Ordnername der Installer (`~/MusicGenerator`, `%USERPROFILE%\MusicGenerator`).
 const DEFAULT_DIR: &str = "MusicGenerator";
 
-/// Reihenfolge: Umgebungsvariable `MG_PROJECT_DIR` → gespeicherte Wahl → `~/MusicGenerator` →
-/// im Debug-Build das Repository, aus dem die App gebaut wurde (zum Entwickeln).
-pub fn project_dir(saved: Option<&Path>) -> Option<PathBuf> {
-    let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Some(p) = std::env::var_os("MG_PROJECT_DIR") {
-        candidates.push(PathBuf::from(p));
-    }
-    if let Some(p) = saved {
-        candidates.push(p.to_path_buf());
-    }
-    if let Some(home) = dirs::home_dir() {
-        candidates.push(home.join(DEFAULT_DIR));
-    }
-    if cfg!(debug_assertions) {
-        candidates.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."));
-    }
-    candidates
-        .into_iter()
-        .find(|p| is_project(p))
-        .map(|p| p.canonicalize().unwrap_or(p))
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Layout {
+    pub code: PathBuf,
+    pub home: PathBuf,
 }
 
-/// Ein Projektordner hat die Web-App und die gemeinsamen Einstellungen.
+impl Layout {
+    /// Programmcode und Daten getrennt (installierte App)?
+    pub fn bundled(&self) -> bool {
+        self.code != self.home
+    }
+}
+
+fn repo_dir() -> PathBuf {
+    let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    p.canonicalize().unwrap_or(p)
+}
+
+/// Programmcode: im Debug-Build das Repository, sonst `<Ressourcen>/project`.
+pub fn code_dir(resource_dir: Option<&Path>) -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    if cfg!(debug_assertions) {
+        candidates.push(repo_dir());
+    }
+    if let Some(r) = resource_dir {
+        candidates.push(r.join("project"));
+    }
+    candidates.into_iter().find(|p| is_project(p))
+}
+
+/// Datenordner: `MG_HOME` → gespeicherte Wahl → im Debug-Build das Repository → `~/MusicGenerator`.
+pub fn home_dir(saved: Option<&Path>) -> PathBuf {
+    if let Some(p) = std::env::var_os("MG_HOME").filter(|p| !p.is_empty()) {
+        return PathBuf::from(p);
+    }
+    if let Some(p) = saved {
+        return p.to_path_buf();
+    }
+    if cfg!(debug_assertions) {
+        return repo_dir();
+    }
+    default_home()
+}
+
+pub fn default_home() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(DEFAULT_DIR)
+}
+
+/// Ein Programmordner hat die Web-App und die gemeinsamen Einstellungen.
 pub fn is_project(p: &Path) -> bool {
     p.join("app").join("main.py").is_file() && p.join("scripts").join("common.sh").is_file()
+}
+
+/// Vollständig eingerichtet: Modellserver und alle nötigen Modelle vorhanden.
+pub fn is_installed(home: &Path) -> bool {
+    ace_server(home).is_some() && missing_models(home).is_empty()
 }
 
 pub fn engine_dir(root: &Path) -> PathBuf {
@@ -112,6 +151,16 @@ pub fn child_path() -> std::ffi::OsString {
         dirs.extend(std::env::split_paths(&p));
     }
     std::env::join_paths(dirs).unwrap_or_default()
+}
+
+/// `uv`: zuerst das mit der App ausgelieferte Programm (neben der ausführbaren Datei), dann der PATH.
+pub fn uv() -> Option<PathBuf> {
+    let exe = if cfg!(windows) { "uv.exe" } else { "uv" };
+    std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(|d| d.join(exe)))
+        .filter(|p| p.is_file())
+        .or_else(|| which("uv"))
 }
 
 /// Programm im erweiterten PATH suchen.
