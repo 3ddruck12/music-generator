@@ -2,6 +2,7 @@
 //! beim Schließen alles wieder. Ablauf und Entscheidungen: `docs/desktop-plan.md`.
 
 mod config;
+mod downloads;
 mod i18n;
 mod paths;
 mod settings;
@@ -53,6 +54,7 @@ struct Shared {
     splash_url: Mutex<Option<Url>>,
     root: Mutex<Option<PathBuf>>,
     settings_path: Option<PathBuf>,
+    web_port: u16,
 }
 
 impl Shared {
@@ -122,6 +124,75 @@ fn set_lang(app: AppHandle, state: State<'_, Shared>, lang: String) {
         let _ = tray.set_menu(Some(menu));
     }
     let _ = app.emit("lang", &lang);
+}
+
+#[derive(Serialize)]
+struct Saved {
+    path: String,
+    message: String,
+    reveal_label: String,
+}
+
+/// Download aus der Web-App speichern (siehe `webapp.js`). Nur die eigene Web-App und `data:`-Adressen.
+#[tauri::command]
+async fn save_download(app: AppHandle, url: String, name: Option<String>) -> Result<Saved, String> {
+    let st = app.state::<Shared>();
+    let (port, lang) = (st.web_port, st.lang());
+    let fail = |detail: String| i18n::t(&lang, "download_failed").replace("{detail}", &detail);
+    let parsed = Url::parse(&url).map_err(|e| fail(e.to_string()))?;
+    let dir = downloads::download_dir();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        if parsed.scheme() == "data" {
+            return downloads::save_data_url(
+                parsed.as_str(),
+                &dir,
+                name.as_deref().unwrap_or("download.txt"),
+            );
+        }
+        let ours = parsed.scheme() == "http"
+            && matches!(parsed.host_str(), Some("localhost") | Some("127.0.0.1"))
+            && parsed.port() == Some(port);
+        if !ours {
+            return Err(format!("{parsed}"));
+        }
+        let mut path_query = parsed.path().to_string();
+        if let Some(q) = parsed.query() {
+            path_query = format!("{path_query}?{q}");
+        }
+        let fallback = name.unwrap_or_else(|| {
+            parsed
+                .path_segments()
+                .and_then(|mut s| s.next_back())
+                .unwrap_or("download")
+                .to_string()
+        });
+        downloads::fetch(port, &path_query, &dir, &fallback)
+    })
+    .await
+    .map_err(|e| fail(e.to_string()))?
+    .map_err(fail)?;
+    let file = result
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    Ok(Saved {
+        path: result.to_string_lossy().into_owned(),
+        message: i18n::t(&lang, "download_saved").replace("{name}", &file),
+        reveal_label: i18n::t(&lang, "download_reveal"),
+    })
+}
+
+/// Gespeicherten Download im Dateimanager zeigen – nur Dateien im Downloads-Ordner.
+#[tauri::command]
+fn reveal_download(app: AppHandle, path: String) {
+    let p = PathBuf::from(path);
+    let inside = match (p.canonicalize(), downloads::download_dir().canonicalize()) {
+        (Ok(p), Ok(d)) => p.starts_with(d),
+        _ => false,
+    };
+    if inside {
+        let _ = app.opener().reveal_item_in_dir(p);
+    }
 }
 
 // ------------------------------------------------------------------ Hilfen
@@ -249,22 +320,9 @@ fn allow_microphone(win: &tauri::WebviewWindow, web_port: u16) -> tauri::Result<
     Ok(())
 }
 
-/// Läuft in jeder Seite des Hauptfensters; wirkt nur in der Web-App. Meldet deren Sprache an die Hülle.
+/// Skript für die Web-App im Hauptfenster: Sprache melden, Downloads an die Hülle leiten (`webapp.js`).
 fn init_script(web_port: u16) -> String {
-    format!(
-        r#"(() => {{
-  if (!["localhost", "127.0.0.1"].includes(location.hostname) || location.port !== "{web_port}") return;
-  window.__MG_DESKTOP__ = true;
-  const send = () => {{
-    try {{
-      const l = typeof LANG === "string" ? LANG : localStorage.getItem("ui_lang");
-      if (l) window.__TAURI_INTERNALS__.invoke("set_lang", {{ lang: l }});
-    }} catch (e) {{}}
-  }};
-  document.addEventListener("langchange", send);
-  window.addEventListener("load", send);
-}})();"#
-    )
+    include_str!("webapp.js").replace("__PORT__", &web_port.to_string())
 }
 
 // ------------------------------------------------------------------ Steuerung (eigener Thread)
@@ -370,7 +428,9 @@ pub fn run() {
             open_logs,
             open_folder,
             quit,
-            set_lang
+            set_lang,
+            save_download,
+            reveal_download
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -400,6 +460,7 @@ pub fn run() {
                 splash_url: Mutex::new(None),
                 root: Mutex::new(None),
                 settings_path,
+                web_port,
             });
 
             let nav_app = handle.clone();

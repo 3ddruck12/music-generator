@@ -24,5 +24,8 @@
   "tray_restart": "Перезапустити сервери",
   "tray_logs": "Відкрити журнали",
   "tray_folder": "Відкрити папку проєкту",
-  "tray_quit": "Вийти"
+  "tray_quit": "Вийти",
+  "download_saved": "Збережено в «Завантаження»: {name}",
+  "download_failed": "Помилка завантаження: {detail}",
+  "download_reveal": "Показати в папці"
 }

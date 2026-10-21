@@ -24,5 +24,8 @@
   "tray_restart": "サーバーを再起動",
   "tray_logs": "ログを開く",
   "tray_folder": "プロジェクトフォルダーを開く",
-  "tray_quit": "終了"
+  "tray_quit": "終了",
+  "download_saved": "ダウンロードに保存しました: {name}",
+  "download_failed": "ダウンロードに失敗しました: {detail}",
+  "download_reveal": "フォルダーで表示"
 }

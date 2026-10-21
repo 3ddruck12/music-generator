@@ -9,6 +9,8 @@ fn main() {
             "open_folder",
             "quit",
             "set_lang",
+            "save_download",
+            "reveal_download",
         ]),
     ))
     .expect("tauri-build fehlgeschlagen");

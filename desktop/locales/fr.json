@@ -24,5 +24,8 @@
   "tray_restart": "Redémarrer les serveurs",
   "tray_logs": "Ouvrir les journaux",
   "tray_folder": "Ouvrir le dossier du projet",
-  "tray_quit": "Quitter"
+  "tray_quit": "Quitter",
+  "download_saved": "Enregistré dans Téléchargements : {name}",
+  "download_failed": "Échec du téléchargement : {detail}",
+  "download_reveal": "Afficher dans le dossier"
 }

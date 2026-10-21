@@ -24,5 +24,8 @@
   "tray_restart": "Sunucuları yeniden başlat",
   "tray_logs": "Günlükleri aç",
   "tray_folder": "Proje klasörünü aç",
-  "tray_quit": "Çık"
+  "tray_quit": "Çık",
+  "download_saved": "İndirilenler'e kaydedildi: {name}",
+  "download_failed": "İndirme başarısız: {detail}",
+  "download_reveal": "Klasörde göster"
 }

@@ -24,5 +24,8 @@
   "tray_restart": "Reiniciar servidores",
   "tray_logs": "Abrir registos",
   "tray_folder": "Abrir pasta do projeto",
-  "tray_quit": "Sair"
+  "tray_quit": "Sair",
+  "download_saved": "Guardado em Transferências: {name}",
+  "download_failed": "Falha na transferência: {detail}",
+  "download_reveal": "Mostrar na pasta"
 }

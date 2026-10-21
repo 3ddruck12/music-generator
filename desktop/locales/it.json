@@ -24,5 +24,8 @@
   "tray_restart": "Riavvia i server",
   "tray_logs": "Apri i log",
   "tray_folder": "Apri cartella del progetto",
-  "tray_quit": "Esci"
+  "tray_quit": "Esci",
+  "download_saved": "Salvato in Download: {name}",
+  "download_failed": "Download non riuscito: {detail}",
+  "download_reveal": "Mostra nella cartella"
 }

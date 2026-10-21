@@ -24,5 +24,8 @@
   "tray_restart": "重启服务器",
   "tray_logs": "打开日志",
   "tray_folder": "打开项目文件夹",
-  "tray_quit": "退出"
+  "tray_quit": "退出",
+  "download_saved": "已保存到“下载”：{name}",
+  "download_failed": "下载失败：{detail}",
+  "download_reveal": "在文件夹中显示"
 }

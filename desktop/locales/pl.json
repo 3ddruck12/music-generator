@@ -24,5 +24,8 @@
   "tray_restart": "Uruchom ponownie serwery",
   "tray_logs": "Otwórz dzienniki",
   "tray_folder": "Otwórz folder projektu",
-  "tray_quit": "Zakończ"
+  "tray_quit": "Zakończ",
+  "download_saved": "Zapisano w Pobranych: {name}",
+  "download_failed": "Pobieranie nie powiodło się: {detail}",
+  "download_reveal": "Pokaż w folderze"
 }
