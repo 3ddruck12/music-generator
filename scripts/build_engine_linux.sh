@@ -41,11 +41,14 @@ cp "$SRC/LICENSE" "$PKG/LICENSE-acestep.cpp.txt"
   echo "ENGINE_REV=$REV7"
   echo "ACESTEP_REV=$ACESTEP_REV"
   echo "BUILD=Vulkan + CPU (GGML_BACKEND_DL, GGML_CPU_ALL_VARIANTS)"
-  echo "BUILT_ON=$(. /etc/os-release && echo "$PRETTY_NAME"), $(ldd --version | head -1)"
+  echo "BUILT_ON=$(. /etc/os-release && echo "$PRETTY_NAME"), $(ldd --version 2>&1 | sed -n 1p)"
 } > "$PKG/BUILDINFO.txt"
 
 # Rauchtest: startet die Programmdatei und meldet sie die erwartete Version?
-"$PKG/ace-server" --help 2>&1 | head -1 | tee /dev/stderr | grep -q "$REV7"
+# (erst ganz lesen: mit pipefail zählt ein abgebrochenes "| head" als Fehler)
+HELP=$("$PKG/ace-server" --help 2>&1 || true)
+echo "$HELP" | sed -n 1p
+grep -q "$REV7" <<< "$HELP" || { echo "ace-server meldet nicht die Version $REV7" >&2; exit 1; }
 
 (cd "$WORK" && rm -f "$NAME.zip" && zip -qry "$NAME.zip" "$NAME")
 sha256sum "$WORK/$NAME.zip" | cut -d' ' -f1 > "$WORK/$NAME.zip.sha256"
