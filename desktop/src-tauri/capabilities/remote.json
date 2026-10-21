@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "webapp",
+  "description": "Die lokale Web-App darf der Hülle nur die eigenen Befehle schicken (Sprache melden).",
+  "windows": [
+    "main"
+  ],
+  "remote": {
+    "urls": [
+      "http://localhost:8765/*",
+      "http://127.0.0.1:8765/*"
+    ]
+  },
+  "permissions": [
+    "allow-set-lang"
+  ]
+}

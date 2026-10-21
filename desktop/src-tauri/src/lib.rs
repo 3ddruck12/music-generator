@@ -1,0 +1,506 @@
+//! Desktop-Hülle für den Music Generator: startet die Server, zeigt die Web-App im eigenen Fenster und beendet
+//! beim Schließen alles wieder. Ablauf und Entscheidungen: `docs/desktop-plan.md`.
+
+mod config;
+mod i18n;
+mod paths;
+mod settings;
+mod supervisor;
+
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use serde::Serialize;
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{
+    AppHandle, Emitter, Manager, RunEvent, State, Url, WebviewUrl, WebviewWindowBuilder, Wry,
+};
+use tauri_plugin_opener::OpenerExt;
+
+use supervisor::{Event, Failure, Role, Supervisor};
+
+const MAIN: &str = "main";
+const TRAY: &str = "main";
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "phase", rename_all = "snake_case")]
+enum Status {
+    Starting {
+        key: String,
+    },
+    Failed {
+        key: String,
+        args: BTreeMap<String, String>,
+        log: Option<String>,
+        tail: String,
+    },
+    Ready,
+}
+
+enum Cmd {
+    Start,
+}
+
+struct Shared {
+    sup: Mutex<Option<Arc<Supervisor>>>,
+    status: Mutex<Status>,
+    lang: Mutex<String>,
+    tx: Mutex<Sender<Cmd>>,
+    splash_url: Mutex<Option<Url>>,
+    root: Mutex<Option<PathBuf>>,
+    settings_path: Option<PathBuf>,
+}
+
+impl Shared {
+    fn lang(&self) -> String {
+        self.lang.lock().unwrap().clone()
+    }
+    fn send(&self, cmd: Cmd) {
+        let _ = self.tx.lock().unwrap().send(cmd);
+    }
+}
+
+// ------------------------------------------------------------------ Befehle der Startseite und der Web-App
+
+#[derive(Serialize)]
+struct SplashState {
+    status: Status,
+    lang: String,
+    texts: i18n::Texts,
+}
+
+#[tauri::command]
+fn splash_state(state: State<'_, Shared>) -> SplashState {
+    let lang = state.lang();
+    SplashState {
+        status: state.status.lock().unwrap().clone(),
+        texts: i18n::texts(&lang),
+        lang,
+    }
+}
+
+#[tauri::command]
+fn retry(state: State<'_, Shared>) {
+    state.send(Cmd::Start);
+}
+
+#[tauri::command]
+fn open_logs(app: AppHandle) {
+    open_dir(&app, paths::data_dir);
+}
+
+#[tauri::command]
+fn open_folder(app: AppHandle) {
+    open_dir(&app, |root| root.to_path_buf());
+}
+
+#[tauri::command]
+fn quit(app: AppHandle) {
+    app.exit(0);
+}
+
+/// Die Web-App meldet ihre Oberflächensprache (Init-Skript, Ereignis `langchange`); Tray und Startseite folgen.
+#[tauri::command]
+fn set_lang(app: AppHandle, state: State<'_, Shared>, lang: String) {
+    if !i18n::is_supported(&lang) || state.lang() == lang {
+        return;
+    }
+    *state.lang.lock().unwrap() = lang.clone();
+    if let Some(p) = &state.settings_path {
+        settings::save(
+            p,
+            &settings::Settings {
+                lang: Some(lang.clone()),
+            },
+        );
+    }
+    if let (Some(tray), Ok(menu)) = (app.tray_by_id(TRAY), tray_menu(&app, &lang)) {
+        let _ = tray.set_menu(Some(menu));
+    }
+    let _ = app.emit("lang", &lang);
+}
+
+// ------------------------------------------------------------------ Hilfen
+
+fn open_dir(app: &AppHandle, which: impl Fn(&std::path::Path) -> PathBuf) {
+    let root = app.state::<Shared>().root.lock().unwrap().clone();
+    if let Some(root) = root {
+        let dir = which(&root);
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = app.opener().open_path(dir.to_string_lossy(), None::<&str>);
+    }
+}
+
+fn set_status(app: &AppHandle, status: Status) {
+    *app.state::<Shared>().status.lock().unwrap() = status.clone();
+    let _ = app.emit("status", status);
+}
+
+fn fail(app: &AppHandle, f: Failure) {
+    let tail = f
+        .log
+        .as_deref()
+        .map(|p| supervisor::tail(p, 30))
+        .unwrap_or_default();
+    set_status(
+        app,
+        Status::Failed {
+            key: f.key.to_string(),
+            args: f
+                .args
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v))
+                .collect(),
+            log: f.log.map(|p| p.to_string_lossy().into_owned()),
+            tail,
+        },
+    );
+    show_splash(app);
+}
+
+fn show_main(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window(MAIN) {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
+fn show_splash(app: &AppHandle) {
+    let splash = app.state::<Shared>().splash_url.lock().unwrap().clone();
+    if let (Some(w), Some(url)) = (app.get_webview_window(MAIN), splash) {
+        if w.url().map(|u| u != url).unwrap_or(true) {
+            let _ = w.navigate(url);
+        }
+    }
+    show_main(app);
+}
+
+fn tray_menu(app: &AppHandle, lang: &str) -> tauri::Result<Menu<Wry>> {
+    let item = |id: &str| {
+        MenuItem::with_id(
+            app,
+            id,
+            i18n::t(lang, &format!("tray_{id}")),
+            true,
+            None::<&str>,
+        )
+    };
+    Menu::with_items(
+        app,
+        &[
+            &item("open")?,
+            &item("restart")?,
+            &PredefinedMenuItem::separator(app)?,
+            &item("logs")?,
+            &item("folder")?,
+            &PredefinedMenuItem::separator(app)?,
+            &item("quit")?,
+        ],
+    )
+}
+
+/// Nur die eigene Web-App und die Startseite bleiben im Fenster, alles andere öffnet der Systembrowser.
+/// `dev_url`: Server, über den `tauri dev` die Startseite ausliefert (im fertigen Paket `None`).
+fn navigation_allowed(url: &Url, web_port: u16, dev_url: Option<&Url>) -> bool {
+    if dev_url.is_some_and(|d| d.origin() == url.origin()) {
+        return true;
+    }
+    match url.scheme() {
+        "tauri" | "about" | "data" | "blob" | "asset" => true,
+        "http" | "https" => match url.host_str() {
+            Some("tauri.localhost") => true,
+            Some("localhost") | Some("127.0.0.1") => url.port_or_known_default() == Some(web_port),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// Linux: WebKitGTK fragt nicht selbst nach dem Mikrofon und lehnt sonst ab. Für „Idee aufnehmen“ wird es nur der
+/// eigenen Web-App erlaubt (macOS und Windows fragen über das System bzw. WebView2).
+fn allow_microphone(win: &tauri::WebviewWindow, web_port: u16) -> tauri::Result<()> {
+    #[cfg(target_os = "linux")]
+    win.with_webview(move |wv| {
+        use webkit2gtk::glib::ObjectExt;
+        use webkit2gtk::{PermissionRequestExt, UserMediaPermissionRequest, WebViewExt};
+        let ours = [
+            format!("http://localhost:{web_port}/"),
+            format!("http://127.0.0.1:{web_port}/"),
+        ];
+        wv.inner().connect_permission_request(move |view, req| {
+            let from_web_app = view
+                .uri()
+                .is_some_and(|u| ours.iter().any(|o| u.starts_with(o.as_str())));
+            if from_web_app && req.is::<UserMediaPermissionRequest>() {
+                req.allow();
+            } else {
+                req.deny();
+            }
+            true
+        });
+    })?;
+    #[cfg(not(target_os = "linux"))]
+    let _ = (win, web_port);
+    Ok(())
+}
+
+/// Läuft in jeder Seite des Hauptfensters; wirkt nur in der Web-App. Meldet deren Sprache an die Hülle.
+fn init_script(web_port: u16) -> String {
+    format!(
+        r#"(() => {{
+  if (!["localhost", "127.0.0.1"].includes(location.hostname) || location.port !== "{web_port}") return;
+  window.__MG_DESKTOP__ = true;
+  const send = () => {{
+    try {{
+      const l = typeof LANG === "string" ? LANG : localStorage.getItem("ui_lang");
+      if (l) window.__TAURI_INTERNALS__.invoke("set_lang", {{ lang: l }});
+    }} catch (e) {{}}
+  }};
+  document.addEventListener("langchange", send);
+  window.addEventListener("load", send);
+}})();"#
+    )
+}
+
+// ------------------------------------------------------------------ Steuerung (eigener Thread)
+
+fn controller(app: AppHandle, rx: Receiver<Cmd>) {
+    loop {
+        match rx.recv_timeout(Duration::from_millis(500)) {
+            Ok(Cmd::Start) => start(&app),
+            Err(RecvTimeoutError::Timeout) => watch(&app),
+            Err(RecvTimeoutError::Disconnected) => return,
+        }
+    }
+}
+
+fn start(app: &AppHandle) {
+    let st = app.state::<Shared>();
+    let old = st.sup.lock().unwrap().take();
+    if let Some(old) = old {
+        old.stop();
+    }
+    show_splash(app);
+    set_status(
+        app,
+        Status::Starting {
+            key: "step_check".into(),
+        },
+    );
+
+    let Some(root) = paths::project_dir(None) else {
+        let expected = dirs::home_dir().unwrap_or_default().join("MusicGenerator");
+        fail(
+            app,
+            Failure::new("err_no_project").arg("path", expected.to_string_lossy()),
+        );
+        return;
+    };
+    *st.root.lock().unwrap() = Some(root.clone());
+    let sup = Arc::new(Supervisor::new(root));
+    *st.sup.lock().unwrap() = Some(sup.clone());
+
+    match sup.start(&|step| {
+        set_status(
+            app,
+            Status::Starting {
+                key: step.key().into(),
+            },
+        )
+    }) {
+        Ok(()) => {
+            set_status(app, Status::Ready);
+            if let (Some(w), Ok(url)) = (app.get_webview_window(MAIN), Url::parse(&sup.url())) {
+                let _ = w.navigate(url);
+            }
+        }
+        Err(f) if f.key == "err_cancelled" => {}
+        Err(f) => {
+            sup.stop();
+            *st.sup.lock().unwrap() = None;
+            fail(app, f);
+        }
+    }
+}
+
+fn watch(app: &AppHandle) {
+    let st = app.state::<Shared>();
+    if !matches!(*st.status.lock().unwrap(), Status::Ready) {
+        return;
+    }
+    let Some(sup) = st.sup.lock().unwrap().clone() else {
+        return;
+    };
+    let log = |r: Role| sup.data_dir().join(r.log_name());
+    let failure = match sup.poll() {
+        None => return,
+        Some(Event::WebExited(Some(a))) if a == "quit" => {
+            app.exit(0);
+            return;
+        }
+        Some(Event::WebExited(Some(a))) if a == "restart" => match sup.restart_web() {
+            Ok(()) => return,
+            Err(f) => f,
+        },
+        Some(Event::WebExited(_)) => Failure::new("err_web_crashed").log(log(Role::Web)),
+        Some(Event::EngineExited(r)) => Failure::new("err_engine_crashed").log(log(r)),
+    };
+    sup.stop();
+    *st.sup.lock().unwrap() = None;
+    fail(app, failure);
+}
+
+// ------------------------------------------------------------------ Einstieg
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    let app = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main(app)
+        }))
+        .plugin(tauri_plugin_opener::init())
+        .invoke_handler(tauri::generate_handler![
+            splash_state,
+            retry,
+            open_logs,
+            open_folder,
+            quit,
+            set_lang
+        ])
+        .setup(|app| {
+            let handle = app.handle().clone();
+            let settings_path = app
+                .path()
+                .app_config_dir()
+                .ok()
+                .map(|d| d.join("settings.json"));
+            let saved = settings_path
+                .as_deref()
+                .map(settings::load)
+                .unwrap_or_default();
+            let lang = i18n::detect(saved.lang.as_deref());
+            let web_port = paths::project_dir(None)
+                .map(|r| config::load_ports(&r))
+                .unwrap_or_default()
+                .web;
+
+            let (tx, rx) = mpsc::channel();
+            app.manage(Shared {
+                sup: Mutex::new(None),
+                status: Mutex::new(Status::Starting {
+                    key: "step_check".into(),
+                }),
+                lang: Mutex::new(lang.clone()),
+                tx: Mutex::new(tx),
+                splash_url: Mutex::new(None),
+                root: Mutex::new(None),
+                settings_path,
+            });
+
+            let nav_app = handle.clone();
+            let dev_url = app.config().build.dev_url.clone();
+            let win = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::App("index.html".into()))
+                .title("Music Generator")
+                .inner_size(1280.0, 860.0)
+                .min_inner_size(720.0, 540.0)
+                .initialization_script(init_script(web_port))
+                .on_navigation(move |url| {
+                    if navigation_allowed(url, web_port, dev_url.as_ref()) {
+                        return true;
+                    }
+                    let _ = nav_app.opener().open_url(url.as_str(), None::<&str>);
+                    false
+                })
+                .build()?;
+            allow_microphone(&win, web_port)?;
+            *app.state::<Shared>().splash_url.lock().unwrap() = win.url().ok();
+
+            TrayIconBuilder::with_id(TRAY)
+                .icon(
+                    app.default_window_icon()
+                        .cloned()
+                        .expect("Fenster-Icon fehlt"),
+                )
+                .tooltip("Music Generator")
+                .menu(&tray_menu(&handle, &lang)?)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, ev| match ev.id().as_ref() {
+                    "open" => show_main(app),
+                    "restart" => app.state::<Shared>().send(Cmd::Start),
+                    "logs" => open_dir(app, paths::data_dir),
+                    "folder" => open_dir(app, |root| root.to_path_buf()),
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, ev| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = ev
+                    {
+                        show_main(tray.app_handle());
+                    }
+                })
+                .build(app)?;
+
+            // SIGTERM/SIGINT/SIGHUP (Abmelden, kill, Strg+C) wie „Beenden“ behandeln, damit die Server mit enden
+            #[cfg(unix)]
+            {
+                use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
+                let mut signals = signal_hook::iterator::Signals::new([SIGTERM, SIGINT, SIGHUP])?;
+                let h = handle.clone();
+                std::thread::spawn(move || {
+                    if signals.forever().next().is_some() {
+                        h.exit(0);
+                    }
+                });
+            }
+
+            std::thread::spawn(move || controller(handle, rx));
+            app.state::<Shared>().send(Cmd::Start);
+            Ok(())
+        })
+        .build(tauri::generate_context!())
+        .expect("Tauri-App konnte nicht erstellt werden");
+
+    app.run(|app, ev| {
+        if let RunEvent::Exit = ev {
+            let sup = app.state::<Shared>().sup.lock().unwrap().take();
+            if let Some(sup) = sup {
+                sup.stop();
+            }
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn navigation_rules() {
+        let ok = |s: &str| navigation_allowed(&Url::parse(s).unwrap(), 8765, None);
+        assert!(ok("tauri://localhost/index.html"));
+        assert!(ok("http://tauri.localhost/index.html"));
+        assert!(ok("http://localhost:8765/"));
+        assert!(ok("http://127.0.0.1:8765/api/songs/1/audio?download=1"));
+        assert!(!ok("http://localhost:8085/"));
+        assert!(!ok(
+            "https://github.com/rabbitfiremediacreation/music-generator"
+        ));
+        assert!(!ok("file:///etc/passwd"));
+        assert!(!ok("http://127.0.0.1:1430/"));
+        let dev = Url::parse("http://127.0.0.1:1430").unwrap();
+        assert!(navigation_allowed(
+            &Url::parse("http://127.0.0.1:1430/").unwrap(),
+            8765,
+            Some(&dev)
+        ));
+    }
+}

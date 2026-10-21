@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Music Generator</title>
+  <link rel="stylesheet" href="splash.css">
+</head>
+<body>
+  <main>
+    <img class="logo" src="logo.svg" alt="" width="84" height="84">
+    <h1>Music Generator</h1>
+    <section id="starting" aria-live="polite">
+      <div class="spinner" aria-hidden="true"></div>
+      <p id="step"></p>
+    </section>
+    <section id="failed" hidden>
+      <p id="error" class="error" role="alert"></p>
+      <p id="logfile" class="muted"></p>
+      <pre id="tail" hidden></pre>
+      <div class="buttons">
+        <button id="retry" class="primary" data-t="btn_retry"></button>
+        <button id="logs" data-t="btn_logs"></button>
+        <button id="folder" data-t="btn_folder"></button>
+        <button id="quit" data-t="btn_quit"></button>
+      </div>
+    </section>
+  </main>
+  <script src="splash.js"></script>
+</body>
+</html>

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
-from . import db
+from . import db, desktop
 from .messages import tr
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -130,6 +130,9 @@ async def apply(request: Request, x_lang: str = Header()):   # Pflicht-Header wi
 
 def _restart(port: int) -> None:
     """Neuen Server abgekoppelt starten, der wartet, bis der Port frei ist; dann diesen beenden."""
+    if desktop.ACTIVE:   # die Desktop-App startet die Web-App selbst neu
+        desktop.exit_now("restart")
+        return
     log = open(ROOT / "data" / "server.log", "ab")
     if sys.platform == "win32":
         script = (f'while (Get-NetTCPConnection -State Listen -LocalPort {port} -ErrorAction SilentlyContinue) {{ Start-Sleep -Milliseconds 300 }}; '
