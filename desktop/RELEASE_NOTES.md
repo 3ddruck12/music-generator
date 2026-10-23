@@ -4,6 +4,12 @@ Desktop-App (Tauri) für den lokalen Music Generator (ACE-Step 1.5 über acestep
 „ON/OFF“ und Browser. Beim ersten Start richtet die App alles selbst ein: Modellserver, Modelle (4–11 GB, mit Fortsetzen
 und SHA-256-Prüfung), Python-Umgebung und Grafiktest.
 
+**Neu in 0.1.3:**
+- Auf dem aktuellen Stand des Originals: Export wahlweise als WAV oder MP3 (Zahnrad › Einstellungen), neue
+  Standardwerte (Iterationen 80, Varianz 1.2).
+- MP3-Export funktioniert in der Desktop-App (der MP3-Wandler wird im Datenordner gesucht).
+- Längere Wartezeit beim ersten Start (2 Minuten), „Cache leeren“ löscht auch den MP3-Zwischenspeicher.
+
 **Neu in 0.1.2:**
 - „Idee aufnehmen“ funktioniert unter Linux: Mikrofon-Zugriff in WebKitGTK eingeschaltet, Aufnahme als WAV statt über
   den MediaRecorder von WebKitGTK (lieferte leere Aufnahmen).

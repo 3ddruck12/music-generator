@@ -1,6 +1,6 @@
 [package]
 name = "music-generator"
-version = "0.1.2"
+version = "0.1.3"
 description = "Desktop-Hülle für den lokalen Music Generator (ACE-Step 1.5 über acestep.cpp)"
 license = "MIT"
 edition = "2021"
