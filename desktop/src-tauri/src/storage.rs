@@ -169,6 +169,7 @@ fn cache_files(home: &Path) -> Vec<PathBuf> {
         let leftover = (n.starts_with("engine-")
             && (n.ends_with(".zip") || n.ends_with(".part") || p.is_dir()))
             || (n.starts_with("mg-") && n.ends_with(".zip"))
+            || (n == "export" && p.is_dir()) // MP3-Zwischenspeicher der Web-App
             || matches!(
                 n.as_str(),
                 "setup.log" | "selftest.log" | "selftest-lm.log" | "build.log"
@@ -264,6 +265,7 @@ mod tests {
         );
         write(&t.path().join(".venv").join("x"), 4);
         write(&paths::data_dir(t.path()).join("setup.log"), 2);
+        write(&paths::data_dir(t.path()).join("export").join("a.mp3"), 6);
         write(&paths::data_dir(t.path()).join("server.log"), 1);
         write(&paths::data_dir(t.path()).join("songs").join("a.mp3"), 9);
         std::fs::write(
@@ -285,7 +287,7 @@ mod tests {
         assert_eq!(get("acestep-v15-xl-sft-Q8_0.gguf").kind, "xl");
         assert!(!get("vae-BF16.gguf").removable);
         assert_eq!(i.models.len(), 6, ".part zählt nicht als Modell");
-        assert_eq!(i.cache_bytes, 7 + 2);
+        assert_eq!(i.cache_bytes, 7 + 2 + 6);
         assert_eq!(i.engine_bytes, 3);
         assert_eq!(i.venv_bytes, 4);
         assert_eq!(i.songs_bytes, 9);
@@ -310,7 +312,7 @@ mod tests {
     #[test]
     fn cache_and_reset_keep_songs() {
         let t = home_with_models();
-        assert_eq!(clear_cache(t.path()), 9);
+        assert_eq!(clear_cache(t.path()), 15);
         assert!(
             paths::data_dir(t.path()).join("server.log").exists(),
             "Logs laufender Server bleiben"
