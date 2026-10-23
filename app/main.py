@@ -310,7 +310,7 @@ MP3_KBPS = 192
 
 def _mp3_tool() -> Path | None:
     """Der MP3-Wandler der Engine (mp3-codec), wenn er mitgeliefert wurde."""
-    b = db.ROOT / "engine" / "acestep.cpp" / "build"
+    b = db.HOME / "engine" / "acestep.cpp" / "build"   # Datenordner (Desktop-App: MG_HOME), sonst der Programmordner
     for p in (b / "mp3-codec", b / "mp3-codec.exe", b / "Release" / "mp3-codec.exe", b / "bin" / "mp3-codec.exe"):
         if p.is_file():
             return p

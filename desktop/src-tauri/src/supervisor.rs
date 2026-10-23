@@ -18,9 +18,8 @@ use crate::paths::{self, Layout};
 /// Datei, in der die Web-App im Desktop-Modus hinterlässt, was nach ihrem Ende passieren soll (`app/desktop.py`).
 pub const EXIT_FILE: &str = "desktop-exit";
 
-/// Wie lange auf die Server gewartet wird. Die Skripte warten 30 s; das erste Laden der Modelle von einer
-/// langsamen Platte kann länger dauern.
-const START_TIMEOUT: Duration = Duration::from_secs(90);
+/// Wie lange auf die Server gewartet wird: zwei Minuten wie die ON-Skripte (der erste Start unter Windows dauert lange).
+const START_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Role {
